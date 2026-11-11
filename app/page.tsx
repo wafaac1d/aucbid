@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { LotCard } from "@/components/LotCard";
 import { SearchForm } from "@/components/SearchForm";
-import { categoryCounts, listMakes, listModels, searchLots, yearBounds } from "@/lib/db";
+import { categoryCounts, listMakes, searchLots, yearBounds } from "@/lib/db";
 import { formatNumber } from "@/lib/format";
 import type { Filters } from "@/lib/types";
 
@@ -48,8 +48,7 @@ export default function HomePage() {
         {totalLots === 0 ? (
           <div className="empty">
             <h2>Каталог ещё не собран</h2>
-            <p>Запустите синхронизацию, чтобы забрать с IAAI и Copart только лоты с датой торгов:</p>
-            <code>npm run sync</code>
+            <p>Нажмите «Синхронизировать» в шапке. Заберутся только лоты IAAI и Copart с уже назначенной датой торгов.</p>
           </div>
         ) : (
           <>
