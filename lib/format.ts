@@ -12,21 +12,6 @@ const ACRONYMS = new Set([
   "AMG",
 ]);
 
-const ZONES: Record<string, string> = {
-  EST: "America/New_York",
-  EDT: "America/New_York",
-  CST: "America/Chicago",
-  CDT: "America/Chicago",
-  MST: "America/Denver",
-  MDT: "America/Denver",
-  PST: "America/Los_Angeles",
-  PDT: "America/Los_Angeles",
-  AKST: "America/Anchorage",
-  AKDT: "America/Anchorage",
-  HST: "Pacific/Honolulu",
-  AST: "America/Puerto_Rico",
-};
-
 const PHRASES: Record<string, string> = {
   "FRONT END": "Передняя часть",
   "REAR END": "Задняя часть",
@@ -140,8 +125,93 @@ export function normalizeMake(raw: string): string {
   return display;
 }
 
+const TRIM_WORDS = new Set([
+  "LT", "LTZ", "LS", "RS", "PREMIER", "XLT", "LARIAT", "LIMITED", "SE", "SEL", "LE", "XLE",
+  "SR", "SV", "SL", "EX", "EXL", "TOURING", "BASE", "SR5", "TRD", "PLATINUM", "DENALI",
+  "AT4", "SLE", "SLT", "ELEVATION", "CUSTOM", "RST", "SS", "Z71", "SXT", "LUXURY",
+  "PREMIUM", "ULTIMATE", "PREFERRED", "ACTIV", "ESSENCE", "CONVENIENCE", "LARAMIE",
+  "1LT", "2LT", "3LT", "1LS", "2LS", "1RS", "2RS", "LT1", "LT2", "LTD",
+]);
+
+const TRIM_PAIRS = [
+  ["HIGH", "COUNTRY"],
+  ["KING", "RANCH"],
+];
+
+const PROTECTED_MODELS = new Set(["MARK LT", "AMP 4X4"]);
+
+export function baseModelName(raw: string): string {
+  const cleaned = displayName(raw);
+  if (!cleaned) return "";
+  if (PROTECTED_MODELS.has(cleaned.toUpperCase())) return cleaned;
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  while (tokens.length > 1) {
+    const last = tokens[tokens.length - 1].toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const prev = tokens[tokens.length - 2].toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (TRIM_PAIRS.some(([left, right]) => prev === left && last === right)) {
+      tokens.splice(-2, 2);
+      continue;
+    }
+    if (TRIM_WORDS.has(last) || /^(AWD|FWD|RWD|4WD|2WD|4X4|4X2)$/.test(last)) {
+      tokens.pop();
+      continue;
+    }
+    break;
+  }
+  return tokens.join(" ");
+}
+
 export function nameKey(raw: string): string {
   return decodeHtml(raw).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export function modelKey(raw: string): string {
+  return nameKey(baseModelName(raw));
+}
+
+export function fuelKey(raw: string): "" | "gas" | "diesel" | "hybrid" | "electric" {
+  const text = decodeHtml(raw).toUpperCase();
+  if (!text) return "";
+  if (/HYBRID/.test(text)) return "hybrid";
+  if (/ELECTRIC|\bEV\b|\bBEV\b/.test(text)) return "electric";
+  if (/DIESEL/.test(text)) return "diesel";
+  if (/GAS|PETROL|FLEX|UNLEADED/.test(text)) return "gas";
+  return "";
+}
+
+export function driveKey(raw: string): "" | "awd" | "fwd" | "rwd" {
+  const text = decodeHtml(raw).toUpperCase();
+  if (!text) return "";
+  if (/ALL[ -]?WHEEL|AWD|FOUR[ -]?WHEEL|4WD|4X4|FOUR BY FOUR|QUATTRO/.test(text)) return "awd";
+  if (/FRONT/.test(text)) return "fwd";
+  if (/REAR/.test(text)) return "rwd";
+  return "";
+}
+
+export const MILES_MAX = 500_000;
+
+export function normalizeFuel(raw: string): string {
+  const key = fuelKey(raw);
+  if (key === "gas") return "Gasoline";
+  if (key === "diesel") return "Diesel";
+  if (key === "hybrid") return "Hybrid";
+  if (key === "electric") return "Electric";
+  return cleanText(raw);
+}
+
+export function fuelName(key: string): string {
+  if (key === "gas") return "Бензин";
+  if (key === "diesel") return "Дизель";
+  if (key === "hybrid") return "Гибрид";
+  if (key === "electric") return "Электро";
+  return "";
+}
+
+export function driveName(key: string): string {
+  if (key === "awd") return "Полный привод";
+  if (key === "rwd") return "Задний привод";
+  if (key === "fwd") return "Передний привод";
+  return "";
 }
 
 export function vinKey(vin: string): string {
@@ -174,19 +244,33 @@ export function formatOdometer(value: number | null, unit: string): string {
   return `${formatNumber(value)} ${unit === "km" ? "км" : "миль"}`;
 }
 
-export function formatAuction(iso: string, timezone = ""): string {
+const MINSK = "Europe/Minsk";
+
+export function formatAuction(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "Дата не указана";
-  const abbrev = timezone.toUpperCase();
-  const zone = ZONES[abbrev];
   const formatted = new Intl.DateTimeFormat("ru-RU", {
     day: "numeric",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: zone || "UTC",
+    timeZone: MINSK,
   }).format(date);
-  return `${formatted} ${zone ? abbrev : "UTC"}`;
+  return `${formatted}, Минск`;
+}
+
+export function formatRemaining(iso: string, now = Date.now()): string {
+  const start = new Date(iso).getTime();
+  if (Number.isNaN(start)) return "";
+  const diff = start - now;
+  if (diff <= 0) return "Торги уже начались";
+  const minutesTotal = Math.floor(diff / 60_000);
+  const days = Math.floor(minutesTotal / (60 * 24));
+  const hours = Math.floor((minutesTotal % (60 * 24)) / 60);
+  const minutes = minutesTotal % 60;
+  if (days > 0) return `через ${days} д ${hours} ч`;
+  if (hours > 0) return `через ${hours} ч ${minutes} мин`;
+  return `через ${Math.max(minutes, 1)} мин`;
 }
 
 export function moneyOrNull(value: number): number | null {

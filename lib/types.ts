@@ -43,6 +43,10 @@ export type Filters = {
   model: string;
   yearFrom: number | null;
   yearTo: number | null;
+  fuel: "" | "gas" | "diesel" | "hybrid" | "electric";
+  drive: "" | "awd" | "fwd" | "rwd";
+  milesFrom: number | null;
+  milesTo: number | null;
   q: string;
   page: number;
 };

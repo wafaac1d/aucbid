@@ -106,7 +106,13 @@ img { max-width: 100%; display: block; }
   height: 48px; padding: 0 22px; background: var(--blue); color: white; font-weight: 800; white-space: nowrap;
 }
 .submit:hover { background: var(--blue-dark); }
-.fields select:focus, .query-label input:focus, .header-search input:focus { outline: 2px solid #c5d6ff; border-color: var(--blue); }
+.fields select:focus, .query-label input:focus, .header-search input:focus, .miles-sliders input:focus { outline: 2px solid #c5d6ff; border-color: var(--blue); }
+.miles { margin-top: 4px; }
+.range-head { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 13px; font-weight: 700; }
+.range-head strong { color: var(--ink); }
+.miles-sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
+.miles-sliders label { display: grid; gap: 4px; color: var(--muted); font-size: 13px; font-weight: 700; }
+.miles-sliders input { width: 100%; accent-color: var(--blue); }
 
 .section { padding: 28px; }
 .section--tight { padding-top: 18px; }
@@ -140,8 +146,11 @@ img { max-width: 100%; display: block; }
 .card-kicker { margin: 0 0 4px; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
 .card h3 { margin: 0 0 8px; font-size: 18px; letter-spacing: -0.03em; }
 .card-date, .card-meta, .card-price { margin: 0; }
-.card-date { font-weight: 800; }
-.card-date.is-soon { color: var(--soon); }
+.card-date { display: grid; gap: 2px; font-weight: 800; }
+.card-date.is-soon, .remain { color: var(--soon); }
+.remain { display: block; font-size: 13px; font-weight: 700; }
+.remain.is-started { color: var(--muted); }
+.lot-date .remain { margin-top: 4px; font-size: 16px; }
 .card-meta { color: var(--muted); margin-top: 4px; font-size: 14px; }
 .card-price { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .card-price strong { color: var(--ink); font-size: 18px; }
@@ -149,8 +158,17 @@ img { max-width: 100%; display: block; }
   display: inline-flex; align-items: center; height: 26px; padding: 0 8px; border-radius: 999px;
   background: var(--navy); color: white; font-size: 12px; font-weight: 800;
 }
-.card-photo .badge { position: absolute; top: 10px; left: 10px; }
-.badge--soon { left: auto; right: 10px; background: #f59e0b; color: #1b2433; }
+.card-badges {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  gap: 6px;
+}
+.badge--soon { background: #f59e0b; color: #1b2433; }
+.photo-frame { position: relative; }
+.photo-frame .lot-photo { display: block; }
 .badge--iaai { background: #c2410c; }
 .badge--copart { background: #1463c2; }
 .badge--plain { background: #e8eef8; color: var(--ink); }
@@ -206,7 +224,7 @@ img { max-width: 100%; display: block; }
   .nav { order: 2; }
   .hero, .section, .search-panel--page, .lot-grid, .specs, .back { padding-left: 16px; padding-right: 16px; }
   .search-panel--page { margin-left: 16px; margin-right: 16px; }
-  .cards, .stats, .specs, .lot-grid, .fields, .source-row, .query-row, .footer { grid-template-columns: 1fr; display: grid; }
+  .cards, .stats, .specs, .lot-grid, .fields, .source-row, .query-row, .miles-sliders, .footer { grid-template-columns: 1fr; display: grid; }
   .source-row, .query-row, .footer { display: grid; }
   .query-row .submit { width: 100%; }
   .hero { padding-top: 36px; }

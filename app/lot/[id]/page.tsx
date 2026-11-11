@@ -4,7 +4,8 @@ import { notFound } from "next/navigation";
 import { LotCard } from "@/components/LotCard";
 import { LotImage } from "@/components/LotImage";
 import { getLot, relatedLots } from "@/lib/db";
-import { categoryLabel, formatAuction, formatMoney, formatOdometer, nameKey, sourceLabel, translate } from "@/lib/format";
+import { categoryLabel, formatMoney, formatOdometer, nameKey, sourceLabel, translate } from "@/lib/format";
+import { AuctionTime } from "@/components/AuctionTime";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
   const title = [lot.year || null, lot.make, lot.model].filter(Boolean).join(" ");
   const related = relatedLots(lot);
   const place = [lot.city, lot.state].filter(Boolean).join(", ") || lot.location;
+  const soon = new Date(lot.auctionAt).getTime() - Date.now() < 48 * 60 * 60 * 1000;
 
   return (
     <main className="page lot-page">
@@ -38,7 +40,13 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
         <Link href={`/search?category=${lot.category}&make=${nameKey(lot.make)}`}>← {lot.make}</Link>
       </p>
       <div className="lot-grid">
-        <LotImage src={lot.image} alt={title} className="lot-photo" />
+        <div className="photo-frame">
+          <LotImage src={lot.image} alt={title} className="lot-photo" />
+          <div className="card-badges">
+            <span className={`badge badge--${lot.source}`}>{sourceLabel(lot.source)}</span>
+            {soon ? <span className="badge badge--soon">Скоро</span> : null}
+          </div>
+        </div>
         <div className="lot-summary">
           <div className="lot-badges">
             <span className={`badge badge--${lot.source}`}>{sourceLabel(lot.source)}</span>
@@ -46,7 +54,7 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
           </div>
           <h1>{title}</h1>
           {lot.series && lot.series.toLowerCase() !== lot.model.toLowerCase() ? <p className="series">{lot.series}</p> : null}
-          <p className="lot-date">{formatAuction(lot.auctionAt, lot.timezone)}</p>
+          <AuctionTime iso={lot.auctionAt} soon={soon} variant="lot" />
           <p className="lot-place">{place}</p>
           <dl className="price-row">
             <div>

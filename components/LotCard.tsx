@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { categoryLabel, formatAuction, formatMoney, formatOdometer, sourceLabel, translate } from "@/lib/format";
+import { categoryLabel, formatMoney, formatOdometer, sourceLabel, translate } from "@/lib/format";
 import type { Lot } from "@/lib/types";
+import { AuctionTime } from "./AuctionTime";
 import { LotImage } from "./LotImage";
 
 export function LotCard({ lot }: { lot: Lot }) {
@@ -15,13 +16,15 @@ export function LotCard({ lot }: { lot: Lot }) {
       <Link href={`/lot/${lot.id}`} className="card-link">
         <div className="card-photo">
           <LotImage src={lot.image} alt={title} />
-          <span className={`badge badge--${lot.source}`}>{sourceLabel(lot.source)}</span>
-          {soon ? <span className="badge badge--soon">Скоро</span> : null}
+          <div className="card-badges">
+            <span className={`badge badge--${lot.source}`}>{sourceLabel(lot.source)}</span>
+            {soon ? <span className="badge badge--soon">Скоро</span> : null}
+          </div>
         </div>
         <div className="card-body">
           <p className="card-kicker">{categoryLabel(lot.category)}</p>
           <h3>{title}</h3>
-          <p className={`card-date ${soon ? "is-soon" : ""}`}>{formatAuction(lot.auctionAt, lot.timezone)}</p>
+          <AuctionTime iso={lot.auctionAt} soon={soon} />
           <p className="card-meta">{[lot.city || lot.location, lot.state].filter(Boolean).join(", ")}</p>
           <p className="card-meta">{[formatOdometer(lot.odometer, lot.odometerUnit), damage].filter((item) => item && item !== "—").join(" · ") || "Пробег не указан"}</p>
           <p className="card-price">

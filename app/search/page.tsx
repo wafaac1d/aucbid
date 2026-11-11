@@ -3,7 +3,7 @@ import { LotCard } from "@/components/LotCard";
 import { Pagination } from "@/components/Pagination";
 import { SearchForm } from "@/components/SearchForm";
 import { filtersFromParams, filtersToQuery, listMakes, listModels, searchLots, yearBounds } from "@/lib/db";
-import { categoryLabel, formatNumber, sourceLabel } from "@/lib/format";
+import { categoryLabel, driveName, formatNumber, fuelName, sourceLabel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +33,11 @@ export default async function SearchPage({
     makes.find((make) => make.key === filters.make)?.name || "",
     models.find((model) => model.key === filters.model)?.name || "",
     filters.yearFrom || filters.yearTo ? `${filters.yearFrom || "…"}–${filters.yearTo || "…"}` : "",
+    fuelName(filters.fuel),
+    driveName(filters.drive),
+    filters.milesFrom || filters.milesTo != null
+      ? `${filters.milesFrom ? filters.milesFrom.toLocaleString("ru-RU") : "0"}–${filters.milesTo != null ? filters.milesTo.toLocaleString("ru-RU") : "500 000+"} миль`
+      : "",
     filters.q ? `«${filters.q}»` : "",
   ].filter(Boolean);
 

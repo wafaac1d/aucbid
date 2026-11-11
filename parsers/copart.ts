@@ -1,6 +1,6 @@
 import { existsSync } from "fs";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
-import { cleanText, displayName, moneyOrNull, normalizeMake } from "../lib/format";
+import { cleanText, displayName, moneyOrNull, normalizeFuel, normalizeMake } from "../lib/format";
 import type { Category, Lot } from "../lib/types";
 import type { PullResult } from "./iaai";
 
@@ -40,6 +40,7 @@ type CopartRaw = {
   engine: string;
   transmission: string;
   drive: string;
+  fuel: string;
   color: string;
   bid: number;
   acv: number;
@@ -110,6 +111,7 @@ async function searchInPage(filters: string[], pageIndex: number, size: number):
         engine: String(lot.egn || ""),
         transmission: String(lot.tmtp || ""),
         drive: String(lot.drv || ""),
+        fuel: String(lot.ft || ""),
         color: String(lot.clr || ""),
         bid: Number(dynamic.currentBid || lot.hb || 0),
         acv: Number(lot.la || 0),
@@ -181,6 +183,7 @@ async function directSearch(filters: string[], pageIndex: number, size: number):
         engine: String(lot.egn || ""),
         transmission: String(lot.tmtp || ""),
         drive: String(lot.drv || ""),
+        fuel: String(lot.ft || ""),
         color: String(lot.clr || ""),
         bid: Number(dynamic.currentBid || lot.hb || 0),
         acv: Number(lot.la || 0),
@@ -223,7 +226,7 @@ function mapLot(raw: CopartRaw, category: Category): Lot | null {
     titleDoc: cleanText(raw.title),
     condition: cleanText(raw.condition),
     keys: cleanText(raw.keys),
-    fuel: "",
+    fuel: normalizeFuel(raw.fuel),
     transmission: cleanText(raw.transmission),
     drive: cleanText(raw.drive),
     engine: cleanText(raw.engine),

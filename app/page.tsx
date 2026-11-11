@@ -14,6 +14,10 @@ const homeFilters: Filters = {
   model: "",
   yearFrom: null,
   yearTo: null,
+  fuel: "",
+  drive: "",
+  milesFrom: null,
+  milesTo: null,
   q: "",
   page: 1,
 };

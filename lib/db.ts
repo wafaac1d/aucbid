@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
-import { nameKey, vinKey } from "./format";
+import { baseModelName, driveKey, fuelKey, MILES_MAX, modelKey, nameKey, vinKey } from "./format";
 import type { Category, Filters, Lot, NamedCount, Source } from "./types";
 
 const globalForDb = globalThis as unknown as { aucbid?: DatabaseSync };
@@ -52,21 +52,46 @@ function openDatabase(): DatabaseSync {
       acv INTEGER,
       image TEXT NOT NULL DEFAULT '',
       url TEXT NOT NULL DEFAULT '',
-      seen_at INTEGER
+      seen_at INTEGER,
+      fuel_key TEXT NOT NULL DEFAULT '',
+      drive_key TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_lots_browse ON lots(category, make_key, model_key, year, auction_at);
     CREATE INDEX IF NOT EXISTS idx_lots_source ON lots(source, auction_at);
     CREATE INDEX IF NOT EXISTS idx_lots_lot ON lots(lot_number);
     CREATE INDEX IF NOT EXISTS idx_lots_vin ON lots(vin_key);
   `);
-  ensureSeenColumn(db);
+  ensureColumn(db, "seen_at", "ALTER TABLE lots ADD COLUMN seen_at INTEGER");
+  ensureColumn(db, "fuel_key", "ALTER TABLE lots ADD COLUMN fuel_key TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "drive_key", "ALTER TABLE lots ADD COLUMN drive_key TEXT NOT NULL DEFAULT ''");
+  rekeyLots(db);
   return db;
 }
 
-function ensureSeenColumn(db: DatabaseSync): void {
+function ensureColumn(db: DatabaseSync, name: string, statement: string): void {
   const columns = db.prepare("PRAGMA table_info(lots)").all() as { name: string }[];
-  if (!columns.some((column) => column.name === "seen_at")) {
-    db.exec("ALTER TABLE lots ADD COLUMN seen_at INTEGER");
+  if (!columns.some((column) => column.name === name)) db.exec(statement);
+}
+
+function rekeyLots(db: DatabaseSync): void {
+  db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  const version = db.prepare("SELECT value FROM meta WHERE key = 'lot_keys'").get() as { value: string } | undefined;
+  if (version?.value === "6") return;
+  const rows = db.prepare("SELECT id, model, fuel, drive FROM lots").all() as {
+    id: string;
+    model: string;
+    fuel: string;
+    drive: string;
+  }[];
+  const update = db.prepare("UPDATE lots SET model_key = ?, fuel_key = ?, drive_key = ? WHERE id = ?");
+  db.exec("BEGIN");
+  try {
+    for (const row of rows) update.run(modelKey(row.model), fuelKey(row.fuel), driveKey(row.drive), row.id);
+    db.prepare("INSERT INTO meta (key, value) VALUES ('lot_keys', '6') ON CONFLICT(key) DO UPDATE SET value = '6'").run();
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
   }
 }
 
@@ -151,12 +176,14 @@ const INSERT = `INSERT OR REPLACE INTO lots (
   id, source, category, lot_number, stock_number, vin, vin_key, year, make, make_key,
   model, model_key, series, auction_at, timezone, location, city, state, odometer,
   odometer_unit, primary_damage, secondary_damage, title_doc, condition, keys, fuel,
-  transmission, drive, engine, color, lane, current_bid, acv, image, url, seen_at
+  transmission, drive, engine, color, lane, current_bid, acv, image, url, seen_at,
+  fuel_key, drive_key
 ) VALUES (
   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?,
-  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+  ?, ?
 )`;
 
 function lotValues(lot: Lot, seenAt: number): Array<string | number | null> {
@@ -172,7 +199,7 @@ function lotValues(lot: Lot, seenAt: number): Array<string | number | null> {
     lot.make,
     nameKey(lot.make),
     lot.model,
-    nameKey(lot.model),
+    modelKey(lot.model),
     lot.series,
     lot.auctionAt,
     lot.timezone,
@@ -197,12 +224,13 @@ function lotValues(lot: Lot, seenAt: number): Array<string | number | null> {
     lot.image,
     lot.url,
     seenAt,
+    fuelKey(lot.fuel),
+    driveKey(lot.drive),
   ];
 }
 
 export function saveLots(lots: Lot[], seenAt: number): number {
   const db = getDb();
-  ensureSeenColumn(db);
   const unique = new Map<string, Lot>();
   for (const lot of lots) {
     if (!lot.auctionAt || !lot.make) continue;
@@ -222,7 +250,6 @@ export function saveLots(lots: Lot[], seenAt: number): number {
 
 export function pruneSource(source: Source, seenAt: number): number {
   const db = getDb();
-  ensureSeenColumn(db);
   const result = db.prepare("DELETE FROM lots WHERE source = ? AND IFNULL(seen_at, 0) != ?").run(source, seenAt);
   return Number(result.changes ?? 0);
 }
@@ -250,9 +277,25 @@ export function replaceSource(source: Source, lots: Lot[]): number {
 
 const freshAuction = "datetime('now', '-36 hours')";
 
+const milesExpr = `(CASE WHEN odometer IS NULL THEN NULL WHEN odometer_unit = 'km' THEN odometer * 0.621371 ELSE odometer END)`;
+
 export function buildWhere(filters: Filters): { sql: string; params: Array<string | number> } {
   const clauses = [`auction_at >= ${freshAuction}`];
   const params: Array<string | number> = [];
+  const q = filters.q.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (q) {
+    clauses.push(`(
+      lot_number = ? OR stock_number = ?
+      OR replace(replace(upper(lot_number), '-', ''), ' ', '') = ?
+      OR replace(replace(upper(stock_number), '-', ''), ' ', '') = ?
+      OR id = 'iaai-' || ? OR id = 'copart-' || ?
+      OR vin_key = ?
+      OR (length(?) >= 6 AND length(vin_key) >= 6 AND (vin_key LIKE ? || '%' OR ? LIKE vin_key || '%' OR instr(vin_key, ?) > 0))
+      OR (length(?) >= 4 AND (lot_number LIKE ? || '%' OR stock_number LIKE ? || '%' OR replace(replace(upper(lot_number), '-', ''), ' ', '') LIKE ? || '%'))
+    )`);
+    params.push(q, q, q, q, q, q, q, q, q, q, q, q, q, q, q);
+    return { sql: clauses.join(" AND "), params };
+  }
   if (filters.category) {
     clauses.push("category = ?");
     params.push(filters.category);
@@ -277,14 +320,21 @@ export function buildWhere(filters: Filters): { sql: string; params: Array<strin
     clauses.push("year <= ?");
     params.push(filters.yearTo);
   }
-  const q = filters.q.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (q) {
-    clauses.push(`(
-      lot_number = ? OR stock_number = ? OR vin_key = ?
-      OR (length(?) >= 6 AND length(vin_key) >= 6 AND (vin_key LIKE ? || '%' OR ? LIKE vin_key || '%'))
-      OR (length(?) >= 5 AND (lot_number LIKE ? || '%' OR stock_number LIKE ? || '%'))
-    )`);
-    params.push(q, q, q, q, q, q, q, q, q);
+  if (filters.fuel) {
+    clauses.push("fuel_key = ?");
+    params.push(filters.fuel);
+  }
+  if (filters.drive) {
+    clauses.push("drive_key = ?");
+    params.push(filters.drive);
+  }
+  if (filters.milesFrom != null && filters.milesFrom > 0) {
+    clauses.push(`${milesExpr} >= ?`);
+    params.push(filters.milesFrom);
+  }
+  if (filters.milesTo != null && filters.milesTo < MILES_MAX) {
+    clauses.push(`${milesExpr} <= ?`);
+    params.push(filters.milesTo);
   }
   return { sql: clauses.join(" AND "), params };
 }
@@ -349,7 +399,11 @@ export function listModels(filters: Pick<Filters, "category" | "source" | "make"
        ORDER BY name COLLATE NOCASE`,
     )
     .all(...params) as unknown as NamedCount[];
-  return rows.map((row) => ({ key: row.key, name: row.name, count: Number(row.count) }));
+  return rows.map((row) => ({
+    key: row.key,
+    name: baseModelName(row.name) || row.name,
+    count: Number(row.count),
+  }));
 }
 
 export function yearBounds(filters: Pick<Filters, "category" | "source">): { min: number; max: number } {
@@ -392,7 +446,7 @@ export function relatedLots(lot: Lot, limit = 4): Lot[] {
        ORDER BY CASE WHEN model_key = ? THEN 0 ELSE 1 END, auction_at ASC
        LIMIT ?`,
     )
-    .all(lot.id, nameKey(lot.make), nameKey(lot.model), limit) as unknown as LotRow[];
+    .all(lot.id, nameKey(lot.make), modelKey(lot.model), limit) as unknown as LotRow[];
   return rows.map(rowToLot);
 }
 
@@ -408,6 +462,15 @@ export function filtersFromParams(params: Record<string, string | string[] | und
   let from = Number.isFinite(yearFrom) && yearFrom >= 1900 ? yearFrom : null;
   let to = Number.isFinite(yearTo) && yearTo >= 1900 ? yearTo : null;
   if (from && to && from > to) [from, to] = [to, from];
+  const fuel = one("fuel");
+  const drive = one("drive");
+  const milesFromText = one("milesFrom");
+  const milesToText = one("milesTo");
+  const milesFromRaw = Number(milesFromText);
+  const milesToRaw = Number(milesToText);
+  let milesFrom = milesFromText !== "" && Number.isFinite(milesFromRaw) && milesFromRaw > 0 ? Math.min(MILES_MAX, Math.round(milesFromRaw)) : null;
+  let milesTo = milesToText !== "" && Number.isFinite(milesToRaw) && milesToRaw >= 0 && milesToRaw < MILES_MAX ? Math.round(milesToRaw) : null;
+  if (milesFrom != null && milesTo != null && milesFrom > milesTo) [milesFrom, milesTo] = [milesTo, milesFrom];
   return {
     category: category === "car" || category === "motorcycle" || category === "atv" ? category : "",
     source: source === "iaai" || source === "copart" ? source : "",
@@ -415,6 +478,10 @@ export function filtersFromParams(params: Record<string, string | string[] | und
     model: nameKey(one("model")),
     yearFrom: from,
     yearTo: to,
+    fuel: fuel === "gas" || fuel === "diesel" || fuel === "hybrid" || fuel === "electric" ? fuel : "",
+    drive: drive === "awd" || drive === "fwd" || drive === "rwd" ? drive : "",
+    milesFrom,
+    milesTo,
     q: one("q").slice(0, 32),
     page: Math.max(1, Number(one("page")) || 1),
   };
@@ -428,6 +495,10 @@ export function filtersToQuery(filters: Filters, page?: number): string {
   if (filters.model) params.set("model", filters.model);
   if (filters.yearFrom) params.set("yearFrom", String(filters.yearFrom));
   if (filters.yearTo) params.set("yearTo", String(filters.yearTo));
+  if (filters.fuel) params.set("fuel", filters.fuel);
+  if (filters.drive) params.set("drive", filters.drive);
+  if (filters.milesFrom) params.set("milesFrom", String(filters.milesFrom));
+  if (filters.milesTo != null) params.set("milesTo", String(filters.milesTo));
   if (filters.q) params.set("q", filters.q);
   if (page && page > 1) params.set("page", String(page));
   return params.toString();
