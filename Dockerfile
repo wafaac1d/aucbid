@@ -7,7 +7,6 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN node --experimental-sqlite -e "const fs=require('fs'); if(!fs.existsSync('data/aucbid.db')) process.exit(0); const {DatabaseSync}=require('node:sqlite'); const db=new DatabaseSync('data/aucbid.db'); db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); db.close();"
 RUN npm run build
 
 FROM node:24-bookworm-slim AS runner
@@ -32,7 +31,6 @@ COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/parsers ./parsers
 COPY --from=build /app/lib ./lib
 COPY --from=build /app/scripts ./scripts
-COPY --from=build /app/data ./data
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
