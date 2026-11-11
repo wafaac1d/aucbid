@@ -148,23 +148,51 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function pullIaai(pages: number, log: (message: string) => void): Promise<Lot[]> {
-  const byId = new Map<string, Lot>();
+export type PullResult = { complete: boolean; saved: number };
+
+function listedCount(html: string): number {
+  return Math.max(0, html.split('id="btnShowWatch"').length - 1);
+}
+
+export async function pullIaai(
+  pages: number,
+  log: (message: string) => void,
+  onPage: (lots: Lot[]) => number,
+): Promise<PullResult> {
+  let complete = true;
+  let saved = 0;
   for (const query of IAAI_QUERIES) {
+    let finished = false;
     for (let page = 1; page <= pages; page += 1) {
       let html = "";
       try {
         html = await fetchIaaiPage(query.facets, page);
       } catch (error) {
-        log(`IAAI ${query.label}, страница ${page}: ${error instanceof Error ? error.message : error}`);
-        break;
+        try {
+          await sleep(1500);
+          html = await fetchIaaiPage(query.facets, page);
+        } catch (retryError) {
+          log(`IAAI ${query.label}, страница ${page}: ${retryError instanceof Error ? retryError.message : retryError}`);
+          complete = false;
+          finished = true;
+          break;
+        }
+        log(`IAAI ${query.label}, страница ${page}: повтор после ошибки ${error instanceof Error ? error.message : error}`);
       }
       const lots = parseIaaiHtml(html, query.category);
+      saved += onPage(lots);
       log(`IAAI ${query.label}: страница ${page}, лотов с датой ${lots.length}`);
-      for (const lot of lots) byId.set(lot.id, lot);
-      if (lots.length < 80) break;
+      if (listedCount(html) < 100) {
+        finished = true;
+        break;
+      }
       await sleep(350);
     }
+    if (!finished) {
+      complete = false;
+      log(`IAAI ${query.label}: достигнут предел страниц, выборка неполная`);
+    }
+    if (!complete) break;
   }
-  return [...byId.values()];
+  return { complete, saved };
 }

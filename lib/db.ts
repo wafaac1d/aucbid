@@ -51,14 +51,23 @@ function openDatabase(): DatabaseSync {
       current_bid INTEGER,
       acv INTEGER,
       image TEXT NOT NULL DEFAULT '',
-      url TEXT NOT NULL DEFAULT ''
+      url TEXT NOT NULL DEFAULT '',
+      seen_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_lots_browse ON lots(category, make_key, model_key, year, auction_at);
     CREATE INDEX IF NOT EXISTS idx_lots_source ON lots(source, auction_at);
     CREATE INDEX IF NOT EXISTS idx_lots_lot ON lots(lot_number);
     CREATE INDEX IF NOT EXISTS idx_lots_vin ON lots(vin_key);
   `);
+  ensureSeenColumn(db);
   return db;
+}
+
+function ensureSeenColumn(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(lots)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "seen_at")) {
+    db.exec("ALTER TABLE lots ADD COLUMN seen_at INTEGER");
+  }
 }
 
 export function getDb(): DatabaseSync {
@@ -142,13 +151,81 @@ const INSERT = `INSERT OR REPLACE INTO lots (
   id, source, category, lot_number, stock_number, vin, vin_key, year, make, make_key,
   model, model_key, series, auction_at, timezone, location, city, state, odometer,
   odometer_unit, primary_damage, secondary_damage, title_doc, condition, keys, fuel,
-  transmission, drive, engine, color, lane, current_bid, acv, image, url
+  transmission, drive, engine, color, lane, current_bid, acv, image, url, seen_at
 ) VALUES (
   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?,
-  ?, ?, ?, ?, ?, ?, ?, ?, ?
+  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )`;
+
+function lotValues(lot: Lot, seenAt: number): Array<string | number | null> {
+  return [
+    lot.id,
+    lot.source,
+    lot.category,
+    lot.lotNumber,
+    lot.stockNumber,
+    lot.vin,
+    vinKey(lot.vin),
+    lot.year || 0,
+    lot.make,
+    nameKey(lot.make),
+    lot.model,
+    nameKey(lot.model),
+    lot.series,
+    lot.auctionAt,
+    lot.timezone,
+    lot.location,
+    lot.city,
+    lot.state,
+    lot.odometer,
+    lot.odometerUnit,
+    lot.primaryDamage,
+    lot.secondaryDamage,
+    lot.titleDoc,
+    lot.condition,
+    lot.keys,
+    lot.fuel,
+    lot.transmission,
+    lot.drive,
+    lot.engine,
+    lot.color,
+    lot.lane,
+    lot.currentBid,
+    lot.acv,
+    lot.image,
+    lot.url,
+    seenAt,
+  ];
+}
+
+export function saveLots(lots: Lot[], seenAt: number): number {
+  const db = getDb();
+  ensureSeenColumn(db);
+  const unique = new Map<string, Lot>();
+  for (const lot of lots) {
+    if (!lot.auctionAt || !lot.make) continue;
+    unique.set(lot.id, lot);
+  }
+  const insert = db.prepare(INSERT);
+  db.exec("BEGIN");
+  try {
+    for (const lot of unique.values()) insert.run(...lotValues(lot, seenAt));
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return unique.size;
+}
+
+export function pruneSource(source: Source, seenAt: number): number {
+  const db = getDb();
+  ensureSeenColumn(db);
+  const result = db.prepare("DELETE FROM lots WHERE source = ? AND IFNULL(seen_at, 0) != ?").run(source, seenAt);
+  return Number(result.changes ?? 0);
+}
 
 export function replaceSource(source: Source, lots: Lot[]): number {
   const db = getDb();
@@ -157,49 +234,12 @@ export function replaceSource(source: Source, lots: Lot[]): number {
     if (lot.source !== source || !lot.auctionAt || !lot.make) continue;
     unique.set(lot.id, lot);
   }
+  const seenAt = Date.now();
   const insert = db.prepare(INSERT);
   db.exec("BEGIN");
   try {
     db.prepare("DELETE FROM lots WHERE source = ?").run(source);
-    for (const lot of unique.values()) {
-      insert.run(
-        lot.id,
-        lot.source,
-        lot.category,
-        lot.lotNumber,
-        lot.stockNumber,
-        lot.vin,
-        vinKey(lot.vin),
-        lot.year || 0,
-        lot.make,
-        nameKey(lot.make),
-        lot.model,
-        nameKey(lot.model),
-        lot.series,
-        lot.auctionAt,
-        lot.timezone,
-        lot.location,
-        lot.city,
-        lot.state,
-        lot.odometer,
-        lot.odometerUnit,
-        lot.primaryDamage,
-        lot.secondaryDamage,
-        lot.titleDoc,
-        lot.condition,
-        lot.keys,
-        lot.fuel,
-        lot.transmission,
-        lot.drive,
-        lot.engine,
-        lot.color,
-        lot.lane,
-        lot.currentBid,
-        lot.acv,
-        lot.image,
-        lot.url,
-      );
-    }
+    for (const lot of unique.values()) insert.run(...lotValues(lot, seenAt));
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

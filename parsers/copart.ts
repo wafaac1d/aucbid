@@ -2,6 +2,7 @@ import { existsSync } from "fs";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import { cleanText, displayName, moneyOrNull, normalizeMake } from "../lib/format";
 import type { Category, Lot } from "../lib/types";
+import type { PullResult } from "./iaai";
 
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -65,7 +66,7 @@ async function searchInPage(filters: string[], pageIndex: number, size: number):
     body: JSON.stringify({
       query: ["*"],
       filter: { MISC: [...filters, "auction_date_utc:[NOW/DAY TO *]"] },
-      sort: ["auction_date_utc asc"],
+      sort: ["auction_date_utc asc", "lot_number asc"],
       page: pageIndex,
       size,
       watchListOnly: false,
@@ -132,7 +133,7 @@ async function directSearch(filters: string[], pageIndex: number, size: number):
     body: JSON.stringify({
       query: ["*"],
       filter: { MISC: [...filters, "auction_date_utc:[NOW/DAY TO *]"] },
-      sort: ["auction_date_utc asc"],
+      sort: ["auction_date_utc asc", "lot_number asc"],
       page: pageIndex,
       size,
       watchListOnly: false,
@@ -270,7 +271,7 @@ async function openBrowser(): Promise<{ page: Page; browser: Browser }> {
           body: JSON.stringify({
             query: ["*"],
             filter: { MISC: ['member_vehicle_type:"ATV"', "auction_date_utc:[NOW/DAY TO *]"] },
-            sort: ["auction_date_utc asc"],
+            sort: ["auction_date_utc asc", "lot_number asc"],
             page: 0,
             size: 1,
             watchListOnly: false,
@@ -298,7 +299,11 @@ async function openBrowser(): Promise<{ page: Page; browser: Browser }> {
   throw new Error("Copart не открыл публичный поиск");
 }
 
-export async function pullCopart(pages: number, log: (message: string) => void): Promise<Lot[]> {
+export async function pullCopart(
+  pages: number,
+  log: (message: string) => void,
+  onPage: (lots: Lot[]) => number,
+): Promise<PullResult> {
   let search: (filters: string[], page: number, size: number) => Promise<CopartPage> = directSearch;
   let browser: Browser | null = null;
   try {
@@ -312,21 +317,48 @@ export async function pullCopart(pages: number, log: (message: string) => void):
     search = (filters, pageIndex, size) => page.evaluate(searchInPage, filters, pageIndex, size);
   }
 
-  const byId = new Map<string, Lot>();
+  let complete = true;
+  let saved = 0;
   try {
     for (const query of QUERIES) {
+      let finished = false;
       for (let page = 0; page < pages; page += 1) {
-        const result = await search(query.filters, page, 100);
-        const lots = result.lots
-          .map((lot) => mapLot(lot, query.category))
-          .filter((lot): lot is Lot => Boolean(lot));
+        let result: CopartPage;
+        try {
+          result = await search(query.filters, page, 100);
+        } catch (error) {
+          try {
+            await sleep(1500);
+            result = await search(query.filters, page, 100);
+          } catch (retryError) {
+            log(`Copart ${query.label}, страница ${page + 1}: ${retryError instanceof Error ? retryError.message : retryError}`);
+            complete = false;
+            finished = true;
+            break;
+          }
+          log(`Copart ${query.label}, страница ${page + 1}: повтор после ошибки ${error instanceof Error ? error.message : error}`);
+        }
+        const lots = result.lots.map((lot) => mapLot(lot, query.category)).filter((lot): lot is Lot => Boolean(lot));
+        saved += onPage(lots);
         log(`Copart ${query.label}: страница ${page + 1}, лотов с датой ${lots.length} из ${result.total}`);
-        for (const lot of lots) byId.set(lot.id, lot);
-        if (lots.length < 80 || (page + 1) * 100 >= result.total) break;
+        if (result.lots.length < 100 || (page + 1) * 100 >= result.total) {
+          finished = true;
+          break;
+        }
+        await sleep(120);
       }
+      if (!finished) {
+        complete = false;
+        log(`Copart ${query.label}: достигнут предел страниц, выборка неполная`);
+      }
+      if (!complete) break;
     }
   } finally {
     await browser?.close();
   }
-  return [...byId.values()];
+  return { complete, saved };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

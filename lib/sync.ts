@@ -1,4 +1,4 @@
-import { getDb, replaceSource } from "./db";
+import { getDb, pruneSource, saveLots } from "./db";
 import { pullCopart } from "../parsers/copart";
 import { pullIaai } from "../parsers/iaai";
 
@@ -66,13 +66,16 @@ export function getSyncStatus(): SyncPublicStatus {
   return toPublicStatus(readRow());
 }
 
+const MAX_PAGES = 2000;
+
 export function clampPages(raw: string | undefined): number {
-  const pages = Number(raw || 3);
+  if (!raw) return MAX_PAGES;
+  const pages = Number(raw);
   if (!Number.isFinite(pages) || pages < 1) return 1;
-  return Math.min(30, Math.floor(pages));
+  return Math.min(MAX_PAGES, Math.floor(pages));
 }
 
-function tryBegin(): { accepted: boolean; startedAt: number; status: SyncPublicStatus } {
+function tryBegin(ignoreCooldown: boolean): { accepted: boolean; startedAt: number; status: SyncPublicStatus } {
   ensureSyncTable();
   const db = getDb();
   db.exec("BEGIN IMMEDIATE");
@@ -88,7 +91,8 @@ function tryBegin(): { accepted: boolean; startedAt: number; status: SyncPublicS
       },
       now,
     );
-    if (!status.canStart) {
+    const blocked = (status.running || status.retryAfterMs > 0) && !ignoreCooldown;
+    if (blocked) {
       db.exec("COMMIT");
       return { accepted: false, startedAt: row?.started_at ?? now, status };
     }
@@ -117,25 +121,41 @@ function finishSync(startedAt: number, ok: boolean, message: string): void {
 }
 
 export async function executeSync(pages: number, log: (message: string) => void): Promise<{ ok: boolean; message: string }> {
-  log(`Синхронизация: до ${pages} стр. на каждый запрос, только лоты с датой торгов`);
-  const iaai = await pullIaai(pages, log);
-  const iaaiSaved = replaceSource("iaai", iaai);
-  log(`IAAI сохранено: ${iaaiSaved}`);
+  const seenAt = Date.now();
+  const scope = pages >= MAX_PAGES ? "все страницы" : `до ${pages} стр.`;
+  log(`Синхронизация: ${scope} на каждый запрос, только лоты с датой торгов`);
+  const save = (lots: Parameters<typeof saveLots>[0]) => saveLots(lots, seenAt);
+
+  const iaai = await pullIaai(pages, log, save);
+  if (iaai.complete) {
+    const removed = pruneSource("iaai", seenAt);
+    log(`IAAI сохранено ${iaai.saved}, снято с каталога ${removed}`);
+  } else {
+    log(`IAAI загружен не до конца (${iaai.saved}). Прежние лоты этого аукциона оставлены`);
+  }
+
   try {
-    const copart = await pullCopart(pages, log);
-    const copartSaved = replaceSource("copart", copart);
-    log(`Copart сохранено: ${copartSaved}`);
-    return { ok: true, message: `IAAI ${iaaiSaved}, Copart ${copartSaved}` };
+    const copart = await pullCopart(pages, log, save);
+    if (copart.complete) {
+      const removed = pruneSource("copart", seenAt);
+      log(`Copart сохранено ${copart.saved}, снято с каталога ${removed}`);
+    } else {
+      log(`Copart загружен не до конца (${copart.saved}). Прежние лоты этого аукциона оставлены`);
+    }
+    const ok = iaai.complete && copart.complete;
+    return { ok, message: `IAAI ${iaai.saved}, Copart ${copart.saved}` };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(`Copart пропущен: ${message}`);
-    return { ok: false, message: `IAAI ${iaaiSaved}. Copart: ${message}` };
+    return { ok: false, message: `IAAI ${iaai.saved}. Copart: ${message}` };
   }
 }
 
-function beginOrBusy(): { accepted: boolean; startedAt: number; status: SyncPublicStatus } {
+let syncing = false;
+
+function beginOrBusy(ignoreCooldown: boolean): { accepted: boolean; startedAt: number; status: SyncPublicStatus } {
   try {
-    return tryBegin();
+    return tryBegin(ignoreCooldown);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!/busy|locked/i.test(message)) throw error;
@@ -143,18 +163,23 @@ function beginOrBusy(): { accepted: boolean; startedAt: number; status: SyncPubl
   }
 }
 
-export function requestSync(): { accepted: boolean; status: SyncPublicStatus } {
-  const start = beginOrBusy();
+export function requestSync(options?: { ignoreCooldown?: boolean }): { accepted: boolean; status: SyncPublicStatus } {
+  if (syncing) return { accepted: false, status: getSyncStatus() };
+  const start = beginOrBusy(Boolean(options?.ignoreCooldown));
   if (!start.accepted) return { accepted: false, status: start.status };
+  syncing = true;
   const pages = clampPages(process.env.SYNC_PAGES);
   void executeSync(pages, (message) => console.log(message))
     .then((result) => finishSync(start.startedAt, result.ok, result.message))
-    .catch((error) => finishSync(start.startedAt, false, error instanceof Error ? error.message : String(error)));
+    .catch((error) => finishSync(start.startedAt, false, error instanceof Error ? error.message : String(error)))
+    .finally(() => {
+      syncing = false;
+    });
   return { accepted: true, status: getSyncStatus() };
 }
 
 export async function runCliSync(pages: number): Promise<number> {
-  const start = beginOrBusy();
+  const start = beginOrBusy(false);
   if (!start.accepted) {
     if (start.status.running) console.log("Синхронизация уже выполняется, повторный запрос не отправлен");
     else console.log(`Данные обновлялись меньше 5 минут назад. Повтор через ${Math.ceil(start.status.retryAfterMs / 1000)} с`);
