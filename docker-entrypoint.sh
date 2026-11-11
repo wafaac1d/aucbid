@@ -2,11 +2,20 @@
 set -e
 
 mkdir -p /app/data
-chown -R node:node /app/data
+# Docker sets HOSTNAME to the container id, and Next.js standalone binds to it.
+# Railway's proxy can only reach 0.0.0.0:$PORT.
+export HOSTNAME=0.0.0.0
+
+run() {
+  if chown -R node:node /app/data 2>/dev/null; then
+    exec runuser -u node -- "$@"
+  fi
+  exec "$@"
+}
 
 if [ "$1" = "sync" ]; then
   shift
-  exec runuser -u node -- /opt/tools/node_modules/.bin/tsx /app/scripts/sync.ts "$@"
+  run /opt/tools/node_modules/.bin/tsx /app/scripts/sync.ts "$@"
 fi
 
-exec runuser -u node -- node /app/server.js
+run node /app/server.js
