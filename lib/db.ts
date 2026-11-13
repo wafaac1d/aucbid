@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
-import { baseModelName, driveKey, fuelKey, MILES_MAX, modelKey, nameKey, vinKey } from "./format";
+import { baseModelName, driveKey, foldMakeKeys, fuelKey, MILES_MAX, modelKey, nameKey, normalizeMake, vinKey } from "./format";
 import type { Category, Filters, Lot, NamedCount, Source } from "./types";
 
 const globalForDb = globalThis as unknown as { aucbid?: DatabaseSync };
@@ -64,6 +64,7 @@ function openDatabase(): DatabaseSync {
   ensureColumn(db, "seen_at", "ALTER TABLE lots ADD COLUMN seen_at INTEGER");
   ensureColumn(db, "fuel_key", "ALTER TABLE lots ADD COLUMN fuel_key TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "drive_key", "ALTER TABLE lots ADD COLUMN drive_key TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "images", "ALTER TABLE lots ADD COLUMN images TEXT NOT NULL DEFAULT ''");
   rekeyLots(db);
   return db;
 }
@@ -76,18 +77,32 @@ function ensureColumn(db: DatabaseSync, name: string, statement: string): void {
 function rekeyLots(db: DatabaseSync): void {
   db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   const version = db.prepare("SELECT value FROM meta WHERE key = 'lot_keys'").get() as { value: string } | undefined;
-  if (version?.value === "6") return;
-  const rows = db.prepare("SELECT id, model, fuel, drive FROM lots").all() as {
+  if (version?.value === "7") return;
+  const rows = db.prepare("SELECT id, make, model, fuel, drive FROM lots").all() as {
     id: string;
+    make: string;
     model: string;
     fuel: string;
     drive: string;
   }[];
-  const update = db.prepare("UPDATE lots SET model_key = ?, fuel_key = ?, drive_key = ? WHERE id = ?");
+  const named = rows.map((row) => {
+    const make = normalizeMake(row.make);
+    return { ...row, make, makeKey: nameKey(make) };
+  });
+  const fold = foldMakeKeys(named.map((row) => row.makeKey));
+  const display = new Map<string, string>();
+  for (const row of named) {
+    const target = fold.get(row.makeKey) || row.makeKey;
+    if (row.makeKey === target || !display.has(target)) display.set(target, row.make);
+  }
+  const update = db.prepare("UPDATE lots SET make = ?, make_key = ?, model_key = ?, fuel_key = ?, drive_key = ? WHERE id = ?");
   db.exec("BEGIN");
   try {
-    for (const row of rows) update.run(modelKey(row.model), fuelKey(row.fuel), driveKey(row.drive), row.id);
-    db.prepare("INSERT INTO meta (key, value) VALUES ('lot_keys', '6') ON CONFLICT(key) DO UPDATE SET value = '6'").run();
+    for (const row of named) {
+      const makeKey = fold.get(row.makeKey) || row.makeKey;
+      update.run(display.get(makeKey) || row.make, makeKey, modelKey(row.model), fuelKey(row.fuel), driveKey(row.drive), row.id);
+    }
+    db.prepare("INSERT INTO meta (key, value) VALUES ('lot_keys', '7') ON CONFLICT(key) DO UPDATE SET value = '7'").run();
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -332,7 +347,7 @@ export function buildWhere(filters: Filters): { sql: string; params: Array<strin
     clauses.push(`${milesExpr} >= ?`);
     params.push(filters.milesFrom);
   }
-  if (filters.milesTo != null && filters.milesTo < MILES_MAX) {
+  if (filters.milesTo != null) {
     clauses.push(`${milesExpr} <= ?`);
     params.push(filters.milesTo);
   }
@@ -357,6 +372,21 @@ export function getLot(id: string): Lot | null {
   return row ? rowToLot(row) : null;
 }
 
+export function cachedImages(id: string): string[] {
+  const row = getDb().prepare("SELECT images FROM lots WHERE id = ?").get(id) as { images?: string } | undefined;
+  if (!row?.images) return [];
+  try {
+    const parsed = JSON.parse(row.images) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveImages(id: string, images: string[]): void {
+  getDb().prepare("UPDATE lots SET images = ? WHERE id = ?").run(JSON.stringify(images), id);
+}
+
 export function listMakes(filters: Pick<Filters, "category" | "source">): NamedCount[] {
   const clauses = [`auction_at >= ${freshAuction}`];
   const params: string[] = [];
@@ -376,7 +406,15 @@ export function listMakes(filters: Pick<Filters, "category" | "source">): NamedC
        ORDER BY name COLLATE NOCASE`,
     )
     .all(...params) as unknown as NamedCount[];
-  return rows.map((row) => ({ key: row.key, name: row.name, count: Number(row.count) }));
+  const grouped = new Map<string, NamedCount>();
+  for (const row of rows) {
+    const name = normalizeMake(row.name);
+    const key = nameKey(name);
+    const current = grouped.get(key);
+    if (current) current.count += Number(row.count);
+    else grouped.set(key, { key, name, count: Number(row.count) });
+  }
+  return [...grouped.values()].sort((left, right) => left.name.localeCompare(right.name, "en"));
 }
 
 export function listModels(filters: Pick<Filters, "category" | "source" | "make">): NamedCount[] {
@@ -399,11 +437,15 @@ export function listModels(filters: Pick<Filters, "category" | "source" | "make"
        ORDER BY name COLLATE NOCASE`,
     )
     .all(...params) as unknown as NamedCount[];
-  return rows.map((row) => ({
-    key: row.key,
-    name: baseModelName(row.name) || row.name,
-    count: Number(row.count),
-  }));
+  const grouped = new Map<string, NamedCount>();
+  for (const row of rows) {
+    const name = baseModelName(row.name) || row.name;
+    const key = modelKey(row.name) || row.key;
+    const current = grouped.get(key);
+    if (current) current.count += Number(row.count);
+    else grouped.set(key, { key, name, count: Number(row.count) });
+  }
+  return [...grouped.values()].sort((left, right) => left.name.localeCompare(right.name, "en"));
 }
 
 export function yearBounds(filters: Pick<Filters, "category" | "source">): { min: number; max: number } {
@@ -469,7 +511,7 @@ export function filtersFromParams(params: Record<string, string | string[] | und
   const milesFromRaw = Number(milesFromText);
   const milesToRaw = Number(milesToText);
   let milesFrom = milesFromText !== "" && Number.isFinite(milesFromRaw) && milesFromRaw > 0 ? Math.min(MILES_MAX, Math.round(milesFromRaw)) : null;
-  let milesTo = milesToText !== "" && Number.isFinite(milesToRaw) && milesToRaw >= 0 && milesToRaw < MILES_MAX ? Math.round(milesToRaw) : null;
+  let milesTo = milesToText !== "" && Number.isFinite(milesToRaw) && milesToRaw >= 0 ? Math.min(MILES_MAX, Math.round(milesToRaw)) : null;
   if (milesFrom != null && milesTo != null && milesFrom > milesTo) [milesFrom, milesTo] = [milesTo, milesFrom];
   return {
     category: category === "car" || category === "motorcycle" || category === "atv" ? category : "",

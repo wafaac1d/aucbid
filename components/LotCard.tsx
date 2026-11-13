@@ -5,7 +5,8 @@ import { AuctionTime } from "./AuctionTime";
 import { LotImage } from "./LotImage";
 
 export function LotCard({ lot }: { lot: Lot }) {
-  const soon = new Date(lot.auctionAt).getTime() - Date.now() < 48 * 60 * 60 * 1000;
+  const startsIn = new Date(lot.auctionAt).getTime() - Date.now();
+  const soon = startsIn > 0 && startsIn < 48 * 60 * 60 * 1000;
   const title = [lot.year || null, lot.make, lot.model].filter(Boolean).join(" ");
   const damage = translate(lot.primaryDamage);
   const price = lot.currentBid != null ? formatMoney(lot.currentBid) : lot.acv != null ? formatMoney(lot.acv) : "";

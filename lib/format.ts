@@ -109,20 +109,71 @@ export function displayName(raw: string): string {
     .join("");
 }
 
+const MAKE_ALIAS: Record<string, string> = {
+  YAMA: "Yamaha",
+  YAMAHA: "Yamaha",
+  YAMYAMA: "Yamaha",
+  HARLEYDAVIDSON: "Harley-Davidson",
+  MERCEDES: "Mercedes-Benz",
+  MERCEDESBENZ: "Mercedes-Benz",
+  CANA: "Can-Am",
+  CANAM: "Can-Am",
+  ROLLSROYCE: "Rolls-Royce",
+  LANDROVER: "Land Rover",
+  ALFAROMEO: "Alfa Romeo",
+  ASTONMARTIN: "Aston Martin",
+  VOLKSWAGEN: "Volkswagen",
+  VW: "Volkswagen",
+  CHEV: "Chevrolet",
+  CHEVROLET: "Chevrolet",
+  HOND: "Honda",
+  HONDA: "Honda",
+  TOYT: "Toyota",
+  TOYOTA: "Toyota",
+  LEXS: "Lexus",
+  LEXUS: "Lexus",
+  POLA: "Polaris",
+  POLARIS: "Polaris",
+  CFMO: "CFMoto",
+  CFMOTO: "CFMoto",
+  JOHNDEERE: "John Deere",
+  ARTICCAT: "Arctic Cat",
+  INDIAN: "Indian",
+  TRIUMPH: "Triumph",
+  ROYALENFIELD: "Royal Enfield",
+  FISKER: "Fisker",
+  LUCID: "Lucid",
+  OTHER: "Other",
+  STINGRAY: "Stingray",
+};
+
+const MAKE_TAILS = ["MOTORCYCLECO", "MOTORCYCLES", "MOTORCYCLE", "AUTOMOBILE", "MOTORS", "BOATS", "CORP", "LLC", "INC", "CO"];
+
+function stripMakeSuffix(key: string): string {
+  for (const tail of MAKE_TAILS) {
+    if (key.endsWith(tail) && key.length - tail.length >= 4) return key.slice(0, -tail.length);
+  }
+  return key;
+}
+
 export function normalizeMake(raw: string): string {
   const display = displayName(raw);
-  const key = display.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (key === "YAMA" || key === "YAMAHA") return "Yamaha";
-  if (key === "HARLEYDAVIDSON") return "Harley-Davidson";
-  if (key === "MERCEDES" || key === "MERCEDESBENZ") return "Mercedes-Benz";
-  if (key === "CANAM") return "Can-Am";
-  if (key === "ROLLSROYCE") return "Rolls-Royce";
-  if (key === "LANDROVER") return "Land Rover";
-  if (key === "ALFAROMEO") return "Alfa Romeo";
-  if (key === "ASTONMARTIN") return "Aston Martin";
-  if (key === "VOLKSWAGEN" || key === "VW") return "Volkswagen";
-  if (key === "CHEV" || key === "CHEVROLET") return "Chevrolet";
-  return display;
+  const original = display.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const key = stripMakeSuffix(original);
+  return MAKE_ALIAS[key] || MAKE_ALIAS[original] || (key === original ? display : displayName(key));
+}
+
+const MAKE_FOLD_BLOCK = new Set(["OTHER", "OTHE", "ATV", "BMW", "GMC", "KIA", "MINI", "RAM", "SAAB", "FIAT", "JEEP", "FORD", "AUDI"]);
+
+export function foldMakeKeys(keys: string[]): Map<string, string> {
+  const unique = [...new Set(keys)].sort((left, right) => right.length - left.length);
+  const fold = new Map(unique.map((key) => [key, key]));
+  for (const key of unique) {
+    if (key.length < 4 || MAKE_FOLD_BLOCK.has(key)) continue;
+    const longer = unique.filter((other) => other !== key && other.startsWith(key) && other.length - key.length <= 8);
+    if (longer.length === 1) fold.set(key, fold.get(longer[0]) || longer[0]);
+  }
+  return fold;
 }
 
 const TRIM_WORDS = new Set([
@@ -131,20 +182,52 @@ const TRIM_WORDS = new Set([
   "AT4", "SLE", "SLT", "ELEVATION", "CUSTOM", "RST", "SS", "Z71", "SXT", "LUXURY",
   "PREMIUM", "ULTIMATE", "PREFERRED", "ACTIV", "ESSENCE", "CONVENIENCE", "LARAMIE",
   "1LT", "2LT", "3LT", "1LS", "2LS", "1RS", "2RS", "LT1", "LT2", "LTD",
+  "2D", "4D", "2DR", "4DR", "5DR", "2DOOR", "4DOOR", "5DOOR", "5DOOR",
+  "SEDAN", "COUPE", "CONVERTIBLE", "CONV", "WAGON", "HATCHBACK", "HATCH",
+  "CAB", "PASSENGER", "KOUP", "SPORTWAGEN", "HERITAGE", "CLASSIC", "HD", "LD",
+  "UNLIMITED", "HYBRID", "PHEV", "PRIME", "PLUGIN", "HV", "AUTOMATIC", "SELECT",
+  "CLASS", "PREMIU", "PREM", "PKG", "PACKAGE", "DOOR",
+  "1500", "2500", "3500", "4500", "5500",
 ]);
 
 const TRIM_PAIRS = [
   ["HIGH", "COUNTRY"],
   ["KING", "RANCH"],
+  ["SUPER", "CAB"],
+  ["DOUBLE", "CAB"],
+  ["CREW", "CAB"],
+  ["QUAD", "CAB"],
+  ["EXTENDED", "CAB"],
+  ["KING", "CAB"],
+  ["ACCESS", "CAB"],
+  ["REGULAR", "CAB"],
+  ["MEDIUM", "DUTY"],
+  ["F", "SPORT"],
 ];
 
+const TRIM_LETTERS = new Set(["S", "L", "X", "I", "D", "E", "H"]);
+
 const PROTECTED_MODELS = new Set(["MARK LT", "AMP 4X4"]);
+
+function modelTokens(raw: string): string[] {
+  const tokens: string[] = [];
+  for (const part of displayName(raw).split(/\s+/).filter(Boolean)) {
+    const split = part.match(/^([A-Za-z]{3,})-(\d{3,4}|class|cab|door)$/i);
+    if (split) tokens.push(split[1], split[2]);
+    else tokens.push(part);
+  }
+  return tokens.map((token) => {
+    const key = token.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const series = key.match(/^(\d{3})(I|D|E|H|XI|LI|CI|XE|X|T|H)$/);
+    return series ? series[1] : token;
+  });
+}
 
 export function baseModelName(raw: string): string {
   const cleaned = displayName(raw);
   if (!cleaned) return "";
   if (PROTECTED_MODELS.has(cleaned.toUpperCase())) return cleaned;
-  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  const tokens = modelTokens(raw);
   while (tokens.length > 1) {
     const last = tokens[tokens.length - 1].toUpperCase().replace(/[^A-Z0-9]/g, "");
     const prev = tokens[tokens.length - 2].toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -152,7 +235,10 @@ export function baseModelName(raw: string): string {
       tokens.splice(-2, 2);
       continue;
     }
-    if (TRIM_WORDS.has(last) || /^(AWD|FWD|RWD|4WD|2WD|4X4|4X2)$/.test(last)) {
+    const duty = /^(G?\d{4})$/.test(last) || (/^[A-Z]{2,}$/.test(prev) && /^\d{3}$/.test(last));
+    const engine = /^\d+\.\d+[A-Z]{0,2}$/.test(last) || /^\d+[A-Z]{1,2}$/.test(last);
+    const junk = /[^A-Z0-9]/.test(tokens[tokens.length - 1]) && /\d/.test(last);
+    if (TRIM_WORDS.has(last) || TRIM_LETTERS.has(last) || duty || junk || engine || /^(AWD|FWD|RWD|4WD|2WD|4X4|4X2)$/.test(last)) {
       tokens.pop();
       continue;
     }
@@ -242,6 +328,13 @@ export function formatMoney(value: number | null): string {
 export function formatOdometer(value: number | null, unit: string): string {
   if (!value) return "—";
   return `${formatNumber(value)} ${unit === "km" ? "км" : "миль"}`;
+}
+
+export function formatOdometerDetail(value: number | null, unit: string): string {
+  if (!value) return "";
+  const miles = unit === "km" ? Math.round(value * 0.621371) : Math.round(value);
+  const km = unit === "km" ? Math.round(value) : Math.round(value * 1.60934);
+  return `${formatNumber(miles)} миль (${formatNumber(km)} км)`;
 }
 
 const MINSK = "Europe/Minsk";

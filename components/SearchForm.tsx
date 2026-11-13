@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import { driveName, fuelName, MILES_MAX } from "@/lib/format";
 import type { Filters, NamedCount } from "@/lib/types";
 
@@ -18,12 +18,7 @@ const SOURCES = [
 
 const FUELS = ["", "gas", "diesel", "hybrid", "electric"] as const;
 const DRIVES = ["", "awd", "rwd", "fwd"] as const;
-
-function milesCaption(from: number, to: number): string {
-  const format = (value: number) => new Intl.NumberFormat("ru-RU").format(value);
-  const end = to >= MILES_MAX ? "500 000 и больше" : format(to);
-  return `${format(from)} — ${end} миль`;
-}
+const MILE_STEPS = [0, 10_000, 25_000, 50_000, 75_000, 100_000, 150_000, 200_000, 250_000, 300_000, 400_000, 500_000];
 
 function setAndSubmit(form: HTMLFormElement, name: string, value: string) {
   const field = form.elements.namedItem(name) as HTMLInputElement | null;
@@ -59,19 +54,13 @@ export function SearchForm({
   const years: number[] = [];
   for (let year = yearTo; year >= yearMin; year -= 1) years.push(year);
   const countLabel = new Intl.NumberFormat("ru-RU").format(total);
-  const [milesFrom, setMilesFrom] = useState(values.milesFrom ?? 0);
-  const [milesTo, setMilesTo] = useState(values.milesTo ?? MILES_MAX);
-  useEffect(() => {
-    setMilesFrom(values.milesFrom ?? 0);
-    setMilesTo(values.milesTo ?? MILES_MAX);
-  }, [values.milesFrom, values.milesTo]);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     const form = event.currentTarget;
     const from = form.elements.namedItem("milesFrom") as HTMLInputElement | null;
     const to = form.elements.namedItem("milesTo") as HTMLInputElement | null;
-    if (from && Number(from.value) <= 0) from.disabled = true;
-    if (to && Number(to.value) >= MILES_MAX) to.disabled = true;
+    if (from && (from.value === "" || Number(from.value) <= 0)) from.disabled = true;
+    if (to && to.value === "") to.disabled = true;
     for (const element of Array.from(form.elements)) {
       if (!(element instanceof HTMLInputElement || element instanceof HTMLSelectElement)) continue;
       if (element.name === "milesFrom" || element.name === "milesTo") continue;
@@ -214,37 +203,45 @@ export function SearchForm({
       </div>
       <div className="miles">
         <div className="range-head">
-          <span>Пробег</span>
-          <strong>{milesCaption(milesFrom, milesTo)}</strong>
+          <span>Пробег, мили</span>
         </div>
-        <div className="miles-sliders">
+        <div className="miles-fields">
           <label>
             От
             <input
-              type="range"
               name="milesFrom"
+              type="number"
+              inputMode="numeric"
               min={0}
               max={MILES_MAX}
               step={1000}
-              value={milesFrom}
+              list="mile-steps"
+              defaultValue={values.milesFrom ?? ""}
+              placeholder="0"
               aria-label="Пробег от, мили"
-              onChange={(event) => setMilesFrom(Math.min(Number(event.target.value), milesTo))}
             />
           </label>
           <label>
             До
             <input
-              type="range"
               name="milesTo"
+              type="number"
+              inputMode="numeric"
               min={0}
               max={MILES_MAX}
               step={1000}
-              value={milesTo}
+              list="mile-steps"
+              defaultValue={values.milesTo ?? ""}
+              placeholder="500 000"
               aria-label="Пробег до, мили"
-              onChange={(event) => setMilesTo(Math.max(Number(event.target.value), milesFrom))}
             />
           </label>
         </div>
+        <datalist id="mile-steps">
+          {MILE_STEPS.map((step) => (
+            <option key={step} value={step} />
+          ))}
+        </datalist>
       </div>
       <div className="query-row">
         <label className="query-label">

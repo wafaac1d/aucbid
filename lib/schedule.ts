@@ -25,21 +25,28 @@ export function startSyncSchedule(): void {
   if (globalForSchedule.aucbidSchedule) return;
   globalForSchedule.aucbidSchedule = true;
 
-  void import("./sync").then(({ requestSync }) => {
-    console.log("Синхронизация при запуске");
-    const result = requestSync({ ignoreCooldown: true });
+  void import("./sync").then(({ needsFullSync, refreshEveryMs, requestSync }) => {
+    const full = needsFullSync();
+    console.log(full ? "Полная синхронизация при запуске" : "Короткое обновление при запуске");
+    const result = requestSync({ mode: full ? "full" : "refresh", ignoreCooldown: true });
     if (!result.accepted) console.log("Синхронизация при запуске пропущена: уже выполняется");
+
+    const refresh = setInterval(() => {
+      const next = requestSync({ mode: "refresh" });
+      if (next.accepted) console.log("Короткое обновление каталога");
+    }, refreshEveryMs());
+    if (typeof refresh === "object" && refresh !== null && "unref" in refresh) refresh.unref();
   });
 
   let lastSlot: string | null = null;
   const tick = () => {
     const slot = moscowSyncSlot();
     if (!slot || slot === lastSlot) return;
-    lastSlot = slot;
     void import("./sync").then(({ requestSync }) => {
-      console.log(`Плановая синхронизация ${slot} МСК`);
-      const result = requestSync();
-      if (!result.accepted) console.log("Плановая синхронизация пропущена: уже выполняется или недавно запускалась");
+      console.log(`Полная синхронизация ${slot} МСК`);
+      const result = requestSync({ mode: "full", ignoreCooldown: true });
+      if (result.accepted) lastSlot = slot;
+      else console.log("Полная синхронизация пропущена: уже выполняется");
     });
   };
 

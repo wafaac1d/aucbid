@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import { formatAuction, formatRemaining } from "@/lib/format";
 
 export function AuctionTime({ iso, soon = false, variant = "card" }: { iso: string; soon?: boolean; variant?: "card" | "lot" }) {
-  const [now, setNow] = useState<number | null>(null);
+  const [remaining, setRemaining] = useState<string | null>(null);
   useEffect(() => {
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    const tick = () => setRemaining(formatRemaining(iso));
+    tick();
+    const timer = window.setInterval(tick, 30_000);
     return () => window.clearInterval(timer);
-  }, []);
-  const remaining = formatRemaining(iso, now ?? Date.now());
+  }, [iso]);
   const started = remaining === "Торги уже начались";
 
   if (variant === "lot") {

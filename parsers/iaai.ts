@@ -1,3 +1,5 @@
+import type { CatalogProbe } from "../lib/digest";
+import { headUnchanged, lotPageDigest } from "../lib/digest";
 import { cleanText, decodeHtml, displayName, moneyOrNull, normalizeMake } from "../lib/format";
 import type { Category, Lot } from "../lib/types";
 
@@ -158,41 +160,86 @@ export async function pullIaai(
   pages: number,
   log: (message: string) => void,
   onPage: (lots: Lot[]) => number,
+  probe?: CatalogProbe,
 ): Promise<PullResult> {
   let complete = true;
   let saved = 0;
-  for (const query of IAAI_QUERIES) {
-    let finished = false;
-    for (let page = 1; page <= pages; page += 1) {
-      let html = "";
+  const refresh = probe?.mode === "refresh";
+  const pageLimit = refresh ? probe.headPages : pages;
+
+  async function loadPage(facets: IaaiFacet[], page: number, label: string): Promise<string | null> {
+    try {
+      return await fetchIaaiPage(facets, page);
+    } catch {
       try {
-        html = await fetchIaaiPage(query.facets, page);
-      } catch (error) {
-        try {
-          await sleep(1500);
-          html = await fetchIaaiPage(query.facets, page);
-        } catch (retryError) {
-          log(`IAAI ${query.label}, страница ${page}: ${retryError instanceof Error ? retryError.message : retryError}`);
-          complete = false;
+        await sleep(1500);
+        return await fetchIaaiPage(facets, page);
+      } catch (retryError) {
+        log(`IAAI ${label}, страница ${page}: ${retryError instanceof Error ? retryError.message : retryError}`);
+        return null;
+      }
+    }
+  }
+
+  for (const query of IAAI_QUERIES) {
+    const key = `iaai:${query.label}`;
+    const stored = probe?.read(key) ?? null;
+    let finished = false;
+    let coveredUntil = 0;
+    let headDigest = "";
+    for (let page = 1; page <= pageLimit; page += 1) {
+      const html = await loadPage(query.facets, page, query.label);
+      if (!html) {
+        complete = false;
+        finished = true;
+        break;
+      }
+      const lots = parseIaaiHtml(html, query.category);
+      if (page === 1) {
+        headDigest = lotPageDigest(lots);
+        if (refresh && headUnchanged(headDigest, null, stored)) {
+          log(`IAAI ${query.label}: хеш совпал, середину каталога не запрашиваю`);
+          coveredUntil = 1;
           finished = true;
           break;
         }
-        log(`IAAI ${query.label}, страница ${page}: повтор после ошибки ${error instanceof Error ? error.message : error}`);
       }
-      const lots = parseIaaiHtml(html, query.category);
       saved += onPage(lots);
       log(`IAAI ${query.label}: страница ${page}, лотов с датой ${lots.length}`);
+      coveredUntil = page;
       if (listedCount(html) < 100) {
         finished = true;
         break;
       }
-      await sleep(350);
+      await sleep(refresh ? 700 : 350);
+    }
+    if (probe && headDigest) {
+      probe.write(key, {
+        head: headDigest,
+        ...(probe.mode === "full" && finished ? { lastPage: Math.max(coveredUntil, 1) } : {}),
+      });
+    }
+    if (refresh && stored && stored.lastPage > coveredUntil) {
+      const tailHtml = await loadPage(query.facets, stored.lastPage, query.label);
+      if (tailHtml) {
+        const tailLots = parseIaaiHtml(tailHtml, query.category);
+        saved += onPage(tailLots);
+        log(`IAAI ${query.label}: хвост, страница ${stored.lastPage}, лотов с датой ${tailLots.length}`);
+        if (listedCount(tailHtml) >= 100) {
+          const extraHtml = await loadPage(query.facets, stored.lastPage + 1, query.label);
+          if (extraHtml && listedCount(extraHtml) > 0) {
+            saved += onPage(parseIaaiHtml(extraHtml, query.category));
+            probe?.write(key, { lastPage: stored.lastPage + 1 });
+            log(`IAAI ${query.label}: новая последняя страница ${stored.lastPage + 1}`);
+          }
+        }
+      }
     }
     if (!finished) {
       complete = false;
       log(`IAAI ${query.label}: достигнут предел страниц, выборка неполная`);
     }
-    if (!complete) break;
+    if (!complete && !refresh) break;
   }
-  return { complete, saved };
+  return { complete: !refresh && complete, saved };
 }

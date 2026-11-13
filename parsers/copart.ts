@@ -1,5 +1,7 @@
 import { existsSync } from "fs";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
+import type { CatalogProbe } from "../lib/digest";
+import { headUnchanged, lotPageDigest } from "../lib/digest";
 import { cleanText, displayName, moneyOrNull, normalizeFuel, normalizeMake } from "../lib/format";
 import type { Category, Lot } from "../lib/types";
 import type { PullResult } from "./iaai";
@@ -306,6 +308,7 @@ export async function pullCopart(
   pages: number,
   log: (message: string) => void,
   onPage: (lots: Lot[]) => number,
+  probe?: CatalogProbe,
 ): Promise<PullResult> {
   let search: (filters: string[], page: number, size: number) => Promise<CopartPage> = directSearch;
   let browser: Browser | null = null;
@@ -322,46 +325,150 @@ export async function pullCopart(
 
   let complete = true;
   let saved = 0;
+  const refresh = probe?.mode === "refresh";
+  const pageLimit = refresh ? probe.headPages : pages;
+
+  async function loadPage(filters: string[], page: number, label: string): Promise<CopartPage | null> {
+    try {
+      return await search(filters, page, 100);
+    } catch {
+      try {
+        await sleep(1500);
+        return await search(filters, page, 100);
+      } catch (retryError) {
+        log(`Copart ${label}, страница ${page + 1}: ${retryError instanceof Error ? retryError.message : retryError}`);
+        return null;
+      }
+    }
+  }
+
   try {
     for (const query of QUERIES) {
+      const key = `copart:${query.label}`;
+      const stored = probe?.read(key) ?? null;
       let finished = false;
-      for (let page = 0; page < pages; page += 1) {
-        let result: CopartPage;
-        try {
-          result = await search(query.filters, page, 100);
-        } catch (error) {
-          try {
-            await sleep(1500);
-            result = await search(query.filters, page, 100);
-          } catch (retryError) {
-            log(`Copart ${query.label}, страница ${page + 1}: ${retryError instanceof Error ? retryError.message : retryError}`);
-            complete = false;
+      let coveredUntil = -1;
+      let headDigest = "";
+      let total = 0;
+      for (let page = 0; page < pageLimit; page += 1) {
+        const result = await loadPage(query.filters, page, query.label);
+        if (!result) {
+          complete = false;
+          finished = true;
+          break;
+        }
+        const lots = result.lots.map((lot) => mapLot(lot, query.category)).filter((lot): lot is Lot => Boolean(lot));
+        if (page === 0) {
+          headDigest = lotPageDigest(lots);
+          total = result.total;
+          if (refresh && headUnchanged(headDigest, total, stored)) {
+            log(`Copart ${query.label}: хеш совпал, середину каталога не запрашиваю`);
+            coveredUntil = 0;
             finished = true;
             break;
           }
-          log(`Copart ${query.label}, страница ${page + 1}: повтор после ошибки ${error instanceof Error ? error.message : error}`);
         }
-        const lots = result.lots.map((lot) => mapLot(lot, query.category)).filter((lot): lot is Lot => Boolean(lot));
         saved += onPage(lots);
         log(`Copart ${query.label}: страница ${page + 1}, лотов с датой ${lots.length} из ${result.total}`);
+        coveredUntil = page;
         if (result.lots.length < 100 || (page + 1) * 100 >= result.total) {
           finished = true;
           break;
         }
-        await sleep(120);
+        await sleep(refresh ? 700 : 120);
       }
+      const tailIndex = total > 0 ? Math.ceil(total / 100) - 1 : -1;
+      let lastPage = probe?.mode === "full" && finished ? Math.max(coveredUntil, 0) : tailIndex;
+      if (refresh && tailIndex > coveredUntil) {
+        const tail = await loadPage(query.filters, tailIndex, query.label);
+        if (tail) {
+          const tailLots = tail.lots.map((lot) => mapLot(lot, query.category)).filter((lot): lot is Lot => Boolean(lot));
+          saved += onPage(tailLots);
+          log(`Copart ${query.label}: хвост, страница ${tailIndex + 1}, лотов с датой ${tailLots.length}`);
+          await sleep(700);
+          if (tail.lots.length >= 100) {
+            const extra = await loadPage(query.filters, tailIndex + 1, query.label);
+            if (extra && extra.lots.length > 0) {
+              const extraLots = extra.lots.map((lot) => mapLot(lot, query.category)).filter((lot): lot is Lot => Boolean(lot));
+              saved += onPage(extraLots);
+              lastPage = tailIndex + 1;
+              log(`Copart ${query.label}: новая последняя страница ${tailIndex + 2}`);
+            }
+          }
+        }
+      }
+      if (probe && headDigest && lastPage >= 0) probe.write(key, { head: headDigest, total, lastPage });
+      else if (probe && headDigest) probe.write(key, { head: headDigest, total });
       if (!finished) {
         complete = false;
         log(`Copart ${query.label}: достигнут предел страниц, выборка неполная`);
       }
-      if (!complete) break;
+      if (!complete && !refresh) break;
     }
   } finally {
     await browser?.close();
   }
-  return { complete, saved };
+  return { complete: !refresh && complete, saved };
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type CopartImage = { fullUrl?: string; imageSeqNumber?: number; imageTypeEnum?: string; imageTypeCode?: string };
+
+function imageUrls(payload: unknown): string[] {
+  const data = payload as { data?: { imagesList?: { content?: CopartImage[] } } };
+  const content = data.data?.imagesList?.content || [];
+  return content
+    .filter((item) => item.fullUrl && (item.imageTypeEnum === "IMAGE" || item.imageTypeCode === "IMG"))
+    .sort((left, right) => (left.imageSeqNumber || 0) - (right.imageSeqNumber || 0))
+    .map((item) => String(item.fullUrl));
+}
+
+async function directGallery(lotNumber: string): Promise<string[]> {
+  try {
+    const response = await fetch(`https://www.copart.com/public/data/lotdetails/solr/lotImages/${lotNumber}`, {
+      headers: {
+        "User-Agent": UA,
+        Accept: "application/json",
+        Origin: "https://www.copart.com",
+        Referer: `https://www.copart.com/lot/${lotNumber}`,
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
+    const text = await response.text();
+    if (!text.trim().startsWith("{")) return [];
+    return imageUrls(JSON.parse(text));
+  } catch {
+    return [];
+  }
+}
+
+let gallerySession: Promise<{ page: Page; browser: Browser }> | null = null;
+
+async function galleryPage(): Promise<Page> {
+  if (!gallerySession) {
+    gallerySession = openBrowser().catch((error) => {
+      gallerySession = null;
+      throw error;
+    });
+  }
+  return (await gallerySession).page;
+}
+
+export async function copartGallery(lotNumber: string): Promise<string[]> {
+  const direct = await directGallery(lotNumber);
+  if (direct.length > 0) return [...new Set(direct)];
+  const page = await galleryPage();
+  const text = await page.evaluate(async (lot) => {
+    const response = await fetch(`/public/data/lotdetails/solr/lotImages/${lot}`, {
+      headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+      credentials: "include",
+    });
+    return response.text();
+  }, lotNumber);
+  if (!text.trim().startsWith("{")) return [];
+  return [...new Set(imageUrls(JSON.parse(text)))];
 }
