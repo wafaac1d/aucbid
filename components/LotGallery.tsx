@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useState } from "react";
+import { auctionImageUrl } from "@/lib/images";
 import { LotImage } from "./LotImage";
 
 function iaaiCandidates(image: string): string[] {
@@ -11,7 +12,8 @@ function iaaiCandidates(image: string): string[] {
 function loadImage(url: string): Promise<boolean> {
   return new Promise((resolve) => {
     const image = new Image();
-    image.onload = () => resolve(true);
+    image.referrerPolicy = "no-referrer";
+    image.onload = () => resolve(image.naturalWidth > 0);
     image.onerror = () => resolve(false);
     image.src = url;
   });
@@ -53,7 +55,8 @@ export function LotGallery({
         .then((response) => (response.ok ? response.json() : null))
         .then((payload: { images?: string[] } | null) => {
           if (cancelled || !payload?.images?.length) return;
-          setImages(payload.images);
+          const next = [...new Set(payload.images.map(auctionImageUrl).filter(Boolean))];
+          if (next.length > 0) setImages(next);
         })
         .catch(() => undefined);
     }
@@ -81,7 +84,7 @@ export function LotGallery({
               aria-pressed={index === active}
               onClick={() => setActive(index)}
             >
-              <img src={src} alt="" />
+              <LotImage src={src} alt="" />
             </button>
           ))}
         </div>

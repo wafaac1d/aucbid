@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
-import { baseModelName, driveKey, foldMakeKeys, fuelKey, MILES_MAX, modelKey, nameKey, normalizeMake, vinKey } from "./format";
+import { driveKey, foldMakeKeys, fuelKey, MILES_MAX, modelKey, nameKey, normalizeMake, vinKey } from "./format";
+import { canonicalLotNames, preferredModelName } from "./names";
 import type { Category, Filters, Lot, NamedCount, Source } from "./types";
 
 const globalForDb = globalThis as unknown as { aucbid?: DatabaseSync };
@@ -77,7 +78,7 @@ function ensureColumn(db: DatabaseSync, name: string, statement: string): void {
 function rekeyLots(db: DatabaseSync): void {
   db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   const version = db.prepare("SELECT value FROM meta WHERE key = 'lot_keys'").get() as { value: string } | undefined;
-  if (version?.value === "7") return;
+  if (version?.value === "9") return;
   const rows = db.prepare("SELECT id, make, model, fuel, drive FROM lots").all() as {
     id: string;
     make: string;
@@ -86,8 +87,9 @@ function rekeyLots(db: DatabaseSync): void {
     drive: string;
   }[];
   const named = rows.map((row) => {
-    const make = normalizeMake(row.make);
-    return { ...row, make, makeKey: nameKey(make) };
+    const names = canonicalLotNames(row.make, row.model);
+    const model = names.model === null ? row.model : names.model;
+    return { ...row, make: names.make, model, makeKey: nameKey(names.make) };
   });
   const fold = foldMakeKeys(named.map((row) => row.makeKey));
   const display = new Map<string, string>();
@@ -95,14 +97,14 @@ function rekeyLots(db: DatabaseSync): void {
     const target = fold.get(row.makeKey) || row.makeKey;
     if (row.makeKey === target || !display.has(target)) display.set(target, row.make);
   }
-  const update = db.prepare("UPDATE lots SET make = ?, make_key = ?, model_key = ?, fuel_key = ?, drive_key = ? WHERE id = ?");
+  const update = db.prepare("UPDATE lots SET make = ?, make_key = ?, model = ?, model_key = ?, fuel_key = ?, drive_key = ? WHERE id = ?");
   db.exec("BEGIN");
   try {
     for (const row of named) {
       const makeKey = fold.get(row.makeKey) || row.makeKey;
-      update.run(display.get(makeKey) || row.make, makeKey, modelKey(row.model), fuelKey(row.fuel), driveKey(row.drive), row.id);
+      update.run(display.get(makeKey) || row.make, makeKey, row.model, modelKey(row.model), fuelKey(row.fuel), driveKey(row.drive), row.id);
     }
-    db.prepare("INSERT INTO meta (key, value) VALUES ('lot_keys', '7') ON CONFLICT(key) DO UPDATE SET value = '7'").run();
+    db.prepare("INSERT INTO meta (key, value) VALUES ('lot_keys', '9') ON CONFLICT(key) DO UPDATE SET value = '9'").run();
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -439,8 +441,9 @@ export function listModels(filters: Pick<Filters, "category" | "source" | "make"
     .all(...params) as unknown as NamedCount[];
   const grouped = new Map<string, NamedCount>();
   for (const row of rows) {
-    const name = baseModelName(row.name) || row.name;
-    const key = modelKey(row.name) || row.key;
+    const name = preferredModelName(filters.make, row.name);
+    if (!name) continue;
+    const key = modelKey(name);
     const current = grouped.get(key);
     if (current) current.count += Number(row.count);
     else grouped.set(key, { key, name, count: Number(row.count) });

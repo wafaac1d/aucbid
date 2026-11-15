@@ -96,17 +96,31 @@ img { max-width: 100%; display: block; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .fields { display: grid; grid-template-columns: 1.4fr 1.4fr 0.7fr 0.7fr; gap: 12px; }
 .fields label, .query-label { display: grid; gap: 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
-.fields select, .query-label input {
-  height: 48px; border-radius: 12px; border: 1px solid var(--line); background: #fbfcfe; padding: 0 12px; font-weight: 600; color: var(--ink);
+.fields select, .fields .suggest input, .query-label input {
+  height: 48px; width: 100%; border-radius: 12px; border: 1px solid var(--line); background: #fbfcfe; padding: 0 12px; font-weight: 600; color: var(--ink);
 }
-.fields select:disabled { color: #93a0b5; }
+.fields select:disabled, .fields .suggest input:disabled { color: #93a0b5; }
+.suggest { position: relative; display: block; }
+.suggest.is-open { z-index: 30; }
+.suggest-list {
+  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0;
+  display: grid; max-height: 280px; overflow: auto; padding: 6px;
+  background: white; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+}
+.suggest-list button {
+  display: flex; justify-content: space-between; gap: 12px; width: 100%;
+  border: 0; border-radius: 8px; background: transparent; padding: 8px 10px; text-align: left; font-weight: 700;
+}
+.suggest-list button.is-active, .suggest-list button:hover { background: #eef2f7; }
+.suggest-list button span, .suggest-empty { color: var(--muted); font-weight: 600; }
+.suggest-empty { padding: 8px 10px; }
 .query-row { margin-top: 12px; }
 .query-label { flex: 1; }
 .submit {
   height: 48px; padding: 0 22px; background: var(--blue); color: white; font-weight: 800; white-space: nowrap;
 }
 .submit:hover { background: var(--blue-dark); }
-.fields select:focus, .query-label input:focus, .header-search input:focus, .miles-fields input:focus { outline: 2px solid #c5d6ff; border-color: var(--blue); }
+.fields select:focus, .fields .suggest input:focus, .query-label input:focus, .header-search input:focus, .miles-fields input:focus { outline: 2px solid #c5d6ff; border-color: var(--blue); }
 .miles { margin-top: 4px; }
 .range-head { color: var(--muted); font-size: 13px; font-weight: 700; }
 .miles-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px; }
@@ -134,13 +148,15 @@ img { max-width: 100%; display: block; }
 }
 .make-cloud span { margin-left: 6px; color: var(--muted); font-weight: 600; }
 
-.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.card { background: white; border-radius: 18px; overflow: hidden; border: 1px solid var(--line); }
+.cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.card { background: white; border-radius: 18px; overflow: hidden; border: 1px solid var(--line); min-width: 0; }
 .card-link { display: block; height: 100%; }
 .card-link:hover h3 { color: var(--blue-dark); }
-.card-photo { position: relative; aspect-ratio: 16/10; background: #e8edf4; }
-.card-photo img, .photo { width: 100%; height: 100%; object-fit: cover; }
-.photo--empty, .lot-photo.photo--empty {
+.card-photo { position: relative; aspect-ratio: 16/10; overflow: hidden; background: #e8edf4; min-width: 0; }
+.card-photo img, .card-photo .photo {
+  position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: cover;
+}
+.photo--empty {
   display: grid; place-items: center; background: linear-gradient(160deg, #dbe3ef, #f7f9fc); color: var(--muted); font-weight: 700;
 }
 .card-body { padding: 14px 14px 16px; }
@@ -168,8 +184,15 @@ img { max-width: 100%; display: block; }
   gap: 6px;
 }
 .badge--soon { background: #f59e0b; color: #1b2433; }
-.photo-frame { position: relative; }
-.photo-frame .lot-photo { display: block; }
+.photo-frame {
+  position: relative; width: 100%; aspect-ratio: 16/10; overflow: hidden; min-width: 0;
+  border-radius: 18px; background: #e8edf4;
+}
+.photo-frame .lot-photo, .photo-frame .photo--empty {
+  position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; aspect-ratio: auto;
+  object-fit: cover; border-radius: 0;
+}
+.photo-frame .photo--empty { display: grid; }
 .badge--iaai { background: #c2410c; }
 .badge--copart { background: #1463c2; }
 .badge--plain { background: #e8eef8; color: var(--ink); }
@@ -182,7 +205,7 @@ img { max-width: 100%; display: block; }
 .pager a.is-current { background: var(--navy); color: white; border-color: var(--navy); }
 .pager a.is-disabled { pointer-events: none; opacity: 0.4; }
 
-.page { min-height: 60vh; }
+.page { min-height: 60vh; max-width: 100%; overflow-x: clip; }
 .empty { text-align: left; }
 .empty p { color: var(--muted); line-height: 1.5; }
 .empty code { display: inline-block; background: var(--navy); color: white; border-radius: 10px; padding: 8px 12px; }
@@ -190,17 +213,22 @@ img { max-width: 100%; display: block; }
 .lot-page { padding-bottom: 12px; }
 .lot-head { padding: 22px 28px 0; }
 .lot-head h1 { margin: 12px 0 0; font-size: clamp(28px, 3vw, 40px); letter-spacing: -0.045em; }
-.lot-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.8fr); gap: 18px; align-items: start; padding: 16px 28px 0; }
-.lot-photo { width: 100%; aspect-ratio: 16/10; object-fit: cover; border-radius: 18px; background: #e8edf4; }
+.lot-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.8fr); gap: 18px; align-items: start; padding: 16px 28px 0; }
+.lot-layout > * { min-width: 0; }
+.lot-photo { width: 100%; height: 100%; object-fit: cover; background: #e8edf4; }
 .series { color: var(--muted); margin: 6px 0 0; }
 .lot-date { margin: 0; display: flex; flex-direction: column; align-items: flex-end; font-size: 14px; font-weight: 800; text-align: right; }
 .lot-badges { display: flex; gap: 8px; }
 .lot-aside { display: grid; gap: 12px; }
-.gallery { display: grid; gap: 10px; }
-.thumbs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
-.thumbs button { width: 100%; aspect-ratio: 4/3; padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden; background: #e8edf4; }
+.gallery { display: grid; gap: 10px; min-width: 0; width: 100%; }
+.thumbs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; min-width: 0; }
+.thumbs button {
+  position: relative; width: 100%; min-width: 0; aspect-ratio: 4/3; padding: 0;
+  border: 2px solid transparent; border-radius: 10px; overflow: hidden; background: #e8edf4;
+}
 .thumbs button.is-active { border-color: var(--blue); }
-.thumbs img { width: 100%; height: 100%; object-fit: cover; }
+.thumbs img, .thumbs .photo--empty { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: cover; }
+.thumbs .photo--empty { display: grid; font-size: 11px; line-height: 1.15; text-align: center; padding: 4px; }
 .spec-panel { margin: 0; background: white; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
 .spec-panel > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
 .spec-panel > div:last-child { border-bottom: 0; }
@@ -219,9 +247,9 @@ img { max-width: 100%; display: block; }
 .footer-note { max-width: 36ch; }
 
 @media (max-width: 1100px) {
-  .cards { grid-template-columns: repeat(2, 1fr); }
-  .thumbs { grid-template-columns: repeat(4, 1fr); }
-  .fields { grid-template-columns: 1fr 1fr; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .thumbs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 @media (max-width: 800px) {
   .header { flex-wrap: wrap; height: auto; padding: 12px 16px; gap: 12px; }
@@ -229,8 +257,8 @@ img { max-width: 100%; display: block; }
   .nav { order: 2; }
   .hero, .section, .search-panel--page, .lot-head, .lot-layout { padding-left: 16px; padding-right: 16px; }
   .search-panel--page { margin-left: 16px; margin-right: 16px; }
-  .cards, .stats, .lot-layout, .fields, .source-row, .query-row, .miles-fields, .footer { grid-template-columns: 1fr; display: grid; }
-  .thumbs { grid-template-columns: repeat(4, 1fr); }
+  .cards, .stats, .lot-layout, .fields, .source-row, .query-row, .miles-fields, .footer { grid-template-columns: minmax(0, 1fr); display: grid; }
+  .thumbs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .source-row, .query-row, .footer { display: grid; }
   .query-row .submit { width: 100%; }
   .hero { padding-top: 36px; }

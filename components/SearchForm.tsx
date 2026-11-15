@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { driveName, fuelName, MILES_MAX } from "@/lib/format";
 import type { Filters, NamedCount } from "@/lib/types";
 
@@ -24,14 +24,167 @@ function setAndSubmit(form: HTMLFormElement, name: string, value: string) {
   const field = form.elements.namedItem(name) as HTMLInputElement | null;
   if (field) field.value = value;
   if (name === "category" || name === "source" || name === "make") {
-    const model = form.elements.namedItem("model") as HTMLSelectElement | null;
+    const model = form.elements.namedItem("model") as HTMLInputElement | null;
     if (model) model.value = "";
   }
   if (name === "category" || name === "source") {
-    const make = form.elements.namedItem("make") as HTMLSelectElement | null;
+    const make = form.elements.namedItem("make") as HTMLInputElement | null;
     if (make) make.value = "";
   }
   form.requestSubmit();
+}
+
+function applyTyped(form: HTMLFormElement, name: string, items: NamedCount[]) {
+  const hidden = form.elements.namedItem(name) as HTMLInputElement | null;
+  const visible = form.querySelector(`input[data-suggest="${name}"]`) as HTMLInputElement | null;
+  if (!hidden || !visible || visible.disabled) return;
+  const typed = visible.value.trim();
+  if (!typed) {
+    hidden.value = "";
+    return;
+  }
+  const chosen = items.find((item) => item.key === hidden.value);
+  if (chosen && chosen.name.toLowerCase() === typed.toLowerCase()) return;
+  const needle = typed.toLowerCase();
+  const exact = items.find((item) => item.name.toLowerCase() === needle);
+  const starts = items.filter((item) => item.name.toLowerCase().startsWith(needle));
+  const hit = exact || (starts.length === 1 ? starts[0] : null);
+  if (hit) hidden.value = hit.key;
+}
+
+function filteredItems(items: NamedCount[], needle: string): NamedCount[] {
+  if (!needle) return items;
+  const starts: NamedCount[] = [];
+  const rest: NamedCount[] = [];
+  for (const item of items) {
+    const name = item.name.toLowerCase();
+    if (name.startsWith(needle)) starts.push(item);
+    else if (name.includes(needle)) rest.push(item);
+  }
+  return [...starts, ...rest];
+}
+
+function SuggestField({
+  name,
+  label,
+  items,
+  value,
+  placeholder,
+  disabled,
+  onPick,
+}: {
+  name: string;
+  label: string;
+  items: NamedCount[];
+  value: string;
+  placeholder: string;
+  disabled?: boolean;
+  onPick?: (form: HTMLFormElement) => void;
+}) {
+  const listId = useId();
+  const chosen = items.find((item) => item.key === value);
+  const [text, setText] = useState(chosen?.name ?? "");
+  const [open, setOpen] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const hiddenRef = useRef<HTMLInputElement>(null);
+  const visibleRef = useRef<HTMLInputElement>(null);
+  const activeRef = useRef<HTMLButtonElement>(null);
+  const needle = text.trim().toLowerCase();
+  const editing = needle !== (chosen?.name.toLowerCase() ?? "");
+  const list = editing ? filteredItems(items, needle) : items;
+  const options = editing ? list : [{ key: "", name: placeholder, count: 0 }, ...list];
+
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [cursor, open]);
+
+  function commit(key: string) {
+    const hidden = hiddenRef.current;
+    const visible = visibleRef.current;
+    if (!hidden?.form || !visible) return;
+    const next = items.find((item) => item.key === key);
+    hidden.value = key;
+    visible.value = next?.name ?? "";
+    setText(visible.value);
+    setOpen(false);
+    onPick?.(hidden.form);
+    hidden.form.requestSubmit();
+  }
+
+  return (
+    <label>
+      {label}
+      <span className={`suggest${open ? " is-open" : ""}`}>
+        <input type="hidden" ref={hiddenRef} name={name} defaultValue={value} />
+        <input
+          ref={visibleRef}
+          role="combobox"
+          aria-label={label}
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          data-suggest={name}
+          value={text}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete="off"
+          onFocus={(event) => {
+            event.currentTarget.select();
+            setCursor(0);
+            setOpen(true);
+          }}
+          onBlur={() => {
+            setOpen(false);
+            setText(chosen?.name ?? "");
+          }}
+          onChange={(event) => {
+            setText(event.target.value);
+            setCursor(0);
+            setOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setOpen(true);
+              setCursor((current) => Math.min(current + 1, Math.max(options.length - 1, 0)));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setCursor((current) => Math.max(current - 1, 0));
+            } else if (event.key === "Escape") {
+              setOpen(false);
+              setText(chosen?.name ?? "");
+            } else if (event.key === "Enter" && open) {
+              event.preventDefault();
+              const option = options[cursor];
+              if (option) commit(option.key);
+            }
+          }}
+        />
+        {open && !disabled ? (
+          <span className="suggest-list" id={listId} role="listbox">
+            {options.length === 0 ? <span className="suggest-empty">Ничего не найдено</span> : null}
+            {options.map((option, index) => (
+              <button
+                key={option.key || "all"}
+                ref={index === cursor ? activeRef : undefined}
+                type="button"
+                role="option"
+                id={`${listId}-${index}`}
+                aria-selected={index === cursor}
+                className={index === cursor ? "is-active" : undefined}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setCursor(index)}
+                onClick={() => commit(option.key)}
+              >
+                {option.name}
+                {option.key ? <span>{option.count}</span> : null}
+              </button>
+            ))}
+          </span>
+        ) : null}
+      </span>
+    </label>
+  );
 }
 
 export function SearchForm({
@@ -57,6 +210,14 @@ export function SearchForm({
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     const form = event.currentTarget;
+    applyTyped(form, "make", makes);
+    const make = form.elements.namedItem("make") as HTMLInputElement | null;
+    if (make && make.value !== values.make) {
+      const model = form.elements.namedItem("model") as HTMLInputElement | null;
+      if (model) model.value = "";
+    } else {
+      applyTyped(form, "model", models);
+    }
     const from = form.elements.namedItem("milesFrom") as HTMLInputElement | null;
     const to = form.elements.namedItem("milesTo") as HTMLInputElement | null;
     if (from && (from.value === "" || Number(from.value) <= 0)) from.disabled = true;
@@ -66,14 +227,6 @@ export function SearchForm({
       if (element.name === "milesFrom" || element.name === "milesTo") continue;
       if (!element.value) element.disabled = true;
     }
-  }
-
-  function onMakeChange(event: FormEvent<HTMLSelectElement>) {
-    const form = event.currentTarget.form;
-    if (!form) return;
-    const model = form.elements.namedItem("model") as HTMLSelectElement | null;
-    if (model) model.value = "";
-    form.requestSubmit();
   }
 
   return (
@@ -118,28 +271,25 @@ export function SearchForm({
         </div>
       </div>
       <div className="fields">
-        <label>
-          Марка
-          <select name="make" defaultValue={values.make} aria-label="Марка" onChange={onMakeChange}>
-            <option value="">Все марки</option>
-            {makes.map((make) => (
-              <option key={make.key} value={make.key}>
-                {make.name} ({make.count})
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Модель
-          <select name="model" defaultValue={values.model} aria-label="Модель" disabled={!values.make}>
-            <option value="">{values.make ? "Все модели" : "Сначала марка"}</option>
-            {models.map((model) => (
-              <option key={model.key} value={model.key}>
-                {model.name} ({model.count})
-              </option>
-            ))}
-          </select>
-        </label>
+        <SuggestField
+          name="make"
+          label="Марка"
+          items={makes}
+          value={values.make}
+          placeholder="Все марки"
+          onPick={(form) => {
+            const model = form.elements.namedItem("model") as HTMLInputElement | null;
+            if (model) model.value = "";
+          }}
+        />
+        <SuggestField
+          name="model"
+          label="Модель"
+          items={models}
+          value={values.model}
+          placeholder={values.make ? "Все модели" : "Сначала марка"}
+          disabled={!values.make}
+        />
         <label>
           Год от
           <select name="yearFrom" defaultValue={values.yearFrom || ""} aria-label="Год от">

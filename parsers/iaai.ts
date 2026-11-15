@@ -1,6 +1,7 @@
 import type { CatalogProbe } from "../lib/digest";
 import { headUnchanged, lotPageDigest } from "../lib/digest";
-import { cleanText, decodeHtml, displayName, moneyOrNull, normalizeMake } from "../lib/format";
+import { cleanText, decodeHtml, displayName, moneyOrNull } from "../lib/format";
+import { canonicalLotNames } from "../lib/names";
 import type { Category, Lot } from "../lib/types";
 
 const UA =
@@ -92,9 +93,8 @@ export function parseIaaiHtml(html: string, category: Category): Lot[] {
 
     const salvageId = modal[2];
     const stock = cleanText(modal[1]) || field(slice, "Stock #");
-    const make = normalizeMake(modal[5]);
-    const model = displayName(modal[6]);
-    if (!make) continue;
+    const names = canonicalLotNames(modal[5], modal[6]);
+    if (!names.make) continue;
 
     const place = decodeHtml(slice.match(/aria-label="Branch Name">([^<]+)</)?.[1] || "") || field(slice, "Branch");
     const stateMatch = place.match(/\(([^)]+)\)\s*$/);
@@ -116,8 +116,8 @@ export function parseIaaiHtml(html: string, category: Category): Lot[] {
       stockNumber: stock,
       vin: cleanText(modal[3]),
       year: year >= 1900 && year <= 2035 ? year : 0,
-      make,
-      model,
+      make: names.make,
+      model: names.model === null ? displayName(modal[6]) : names.model,
       series: displayName(modal[7]),
       auctionAt,
       timezone,

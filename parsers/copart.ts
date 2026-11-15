@@ -2,7 +2,9 @@ import { existsSync } from "fs";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import type { CatalogProbe } from "../lib/digest";
 import { headUnchanged, lotPageDigest } from "../lib/digest";
-import { cleanText, displayName, moneyOrNull, normalizeFuel, normalizeMake } from "../lib/format";
+import { cleanText, displayName, moneyOrNull, normalizeFuel } from "../lib/format";
+import { canonicalLotNames } from "../lib/names";
+import { auctionImageUrl } from "../lib/images";
 import type { Category, Lot } from "../lib/types";
 import type { PullResult } from "./iaai";
 
@@ -200,8 +202,8 @@ function mapLot(raw: CopartRaw, category: Category): Lot | null {
   const auctionAt = new Date(raw.ad).toISOString();
   if (Number.isNaN(new Date(auctionAt).getTime())) return null;
   if (raw.ad < Date.now() - 36 * 60 * 60 * 1000) return null;
-  const make = normalizeMake(raw.make);
-  if (!make) return null;
+  const names = canonicalLotNames(raw.make, raw.model);
+  if (!names.make) return null;
   const unit = /^(k|km)$/i.test(raw.odoUom) ? "km" : "mi";
   const city = displayName(raw.city);
   const state = raw.state.trim().toUpperCase();
@@ -213,8 +215,8 @@ function mapLot(raw: CopartRaw, category: Category): Lot | null {
     stockNumber: String(raw.ln),
     vin: cleanText(raw.vin),
     year: raw.year >= 1900 && raw.year <= 2035 ? raw.year : 0,
-    make,
-    model: displayName(raw.model),
+    make: names.make,
+    model: names.model === null ? displayName(raw.model) : names.model,
     series: displayName(raw.series),
     auctionAt,
     timezone: raw.tz.trim().toUpperCase(),
@@ -236,7 +238,7 @@ function mapLot(raw: CopartRaw, category: Category): Lot | null {
     lane: "",
     currentBid: moneyOrNull(raw.bid),
     acv: moneyOrNull(raw.acv),
-    image: raw.image.replace("_thb.", "_ful."),
+    image: auctionImageUrl(raw.image.replace("_thb.", "_ful.")),
     url: `https://www.copart.com/lot/${raw.ln}`,
   };
 }
@@ -423,7 +425,8 @@ function imageUrls(payload: unknown): string[] {
   return content
     .filter((item) => item.fullUrl && (item.imageTypeEnum === "IMAGE" || item.imageTypeCode === "IMG"))
     .sort((left, right) => (left.imageSeqNumber || 0) - (right.imageSeqNumber || 0))
-    .map((item) => String(item.fullUrl));
+    .map((item) => auctionImageUrl(String(item.fullUrl)))
+    .filter(Boolean);
 }
 
 async function directGallery(lotNumber: string): Promise<string[]> {

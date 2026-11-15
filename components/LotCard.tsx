@@ -9,8 +9,7 @@ export function LotCard({ lot }: { lot: Lot }) {
   const soon = startsIn > 0 && startsIn < 48 * 60 * 60 * 1000;
   const title = [lot.year || null, lot.make, lot.model].filter(Boolean).join(" ");
   const damage = translate(lot.primaryDamage);
-  const price = lot.currentBid != null ? formatMoney(lot.currentBid) : lot.acv != null ? formatMoney(lot.acv) : "";
-  const priceLabel = lot.currentBid != null ? "Ставка" : lot.acv != null ? "Оценка" : "";
+  const price = formatMoney(lot.currentBid ?? 0);
 
   return (
     <article className="card">
@@ -29,14 +28,8 @@ export function LotCard({ lot }: { lot: Lot }) {
           <p className="card-meta">{[lot.city || lot.location, lot.state].filter(Boolean).join(", ")}</p>
           <p className="card-meta">{[formatOdometer(lot.odometer, lot.odometerUnit), damage].filter((item) => item && item !== "—").join(" · ") || "Пробег не указан"}</p>
           <p className="card-price">
-            {price ? (
-              <>
-                <span>{priceLabel}</span>
-                <strong>{price}</strong>
-              </>
-            ) : (
-              <span>Ставка не объявлена</span>
-            )}
+            <span>Ставка</span>
+            <strong>{price}</strong>
           </p>
         </div>
       </Link>
