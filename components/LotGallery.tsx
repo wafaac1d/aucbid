@@ -32,40 +32,54 @@ export function LotGallery({
   alt: string;
   badges: ReactNode;
 }) {
+  const expectsMore = source === "copart" || /~I\d+/.test(image);
   const [images, setImages] = useState<string[]>(image ? [image] : []);
   const [active, setActive] = useState(0);
+  const [pending, setPending] = useState(expectsMore);
 
   useEffect(() => {
     let cancelled = false;
     const initial = image ? [image] : [];
     setImages(initial);
     setActive(0);
+    const finish = (next: string[]) => {
+      if (cancelled) return;
+      if (next.length > 0) setImages(next);
+      setPending(false);
+    };
     if (source === "iaai") {
-      void Promise.all(iaaiCandidates(image).map(async (url) => ((await loadImage(url)) ? url : ""))).then((found) => {
-        if (cancelled) return;
-        const next = found.filter(Boolean);
-        if (next.length > 0) setImages(next);
+      const candidates = iaaiCandidates(image);
+      if (candidates.length < 2) {
+        setPending(false);
+        return () => {
+          cancelled = true;
+        };
+      }
+      setPending(true);
+      void Promise.all(candidates.map(async (url) => ((await loadImage(url)) ? url : ""))).then((found) => {
+        finish(found.filter(Boolean));
       });
       return () => {
         cancelled = true;
       };
     }
     if (source === "copart") {
+      setPending(true);
       void fetch(`/api/lots/${encodeURIComponent(lotId)}/images`)
         .then((response) => (response.ok ? response.json() : null))
         .then((payload: { images?: string[] } | null) => {
-          if (cancelled || !payload?.images?.length) return;
-          const next = [...new Set(payload.images.map(auctionImageUrl).filter(Boolean))];
-          if (next.length > 0) setImages(next);
+          const next = [...new Set((payload?.images || []).map(auctionImageUrl).filter(Boolean))];
+          finish(next);
         })
-        .catch(() => undefined);
-    }
+        .catch(() => finish([]));
+    } else setPending(false);
     return () => {
       cancelled = true;
     };
   }, [image, lotId, source]);
 
   const current = images[active] || images[0] || "";
+  const showStrip = pending || images.length > 1;
 
   return (
     <div className="gallery">
@@ -73,22 +87,35 @@ export function LotGallery({
         <LotImage src={current} alt={alt} className="lot-photo" />
         {badges}
       </div>
-      {images.length > 1 ? (
-        <div className="thumbs" aria-label="Фотографии лота">
-          {images.map((src, index) => (
-            <button
-              key={src}
-              type="button"
-              className={index === active ? "is-active" : undefined}
-              aria-label={`Фото ${index + 1}`}
-              aria-pressed={index === active}
-              onClick={() => setActive(index)}
-            >
-              <LotImage src={src} alt="" />
-            </button>
-          ))}
+      {showStrip ? (
+        <div className="thumbs" aria-busy={pending} aria-label={pending ? "Загрузка фотографий" : "Фотографии лота"}>
+          {pending
+            ? Array.from({ length: 6 }, (_, index) => (
+                <span key={index} className="thumb-slot" aria-hidden="true">
+                  <span className="thumb-loader" />
+                </span>
+              ))
+            : images.map((src, index) => (
+                <Thumb
+                  key={src}
+                  src={src}
+                  active={index === active}
+                  label={`Фото ${index + 1}`}
+                  onClick={() => setActive(index)}
+                />
+              ))}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function Thumb({ src, active, label, onClick }: { src: string; active: boolean; label: string; onClick: () => void }) {
+  const [ready, setReady] = useState(false);
+  return (
+    <button type="button" className={active ? "is-active" : undefined} aria-label={label} aria-pressed={active} onClick={onClick}>
+      {ready ? null : <span className="thumb-loader" />}
+      <LotImage src={src} alt="" onReady={() => setReady(true)} />
+    </button>
   );
 }

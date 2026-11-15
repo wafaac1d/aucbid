@@ -229,6 +229,18 @@ img { max-width: 100%; display: block; }
 .thumbs button.is-active { border-color: var(--blue); }
 .thumbs img, .thumbs .photo--empty { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: cover; }
 .thumbs .photo--empty { display: grid; font-size: 11px; line-height: 1.15; text-align: center; padding: 4px; }
+.thumb-slot {
+  position: relative; min-width: 0; aspect-ratio: 4/3; border: 2px solid transparent; border-radius: 10px;
+  overflow: hidden; background: #e8edf4;
+}
+.thumb-loader {
+  position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; background: #e8edf4;
+}
+.thumb-loader::after {
+  content: ""; width: 22px; height: 22px; border-radius: 50%;
+  border: 2px solid #c5d0e0; border-top-color: #1463c2; animation: thumb-spin 0.7s linear infinite;
+}
+@keyframes thumb-spin { to { transform: rotate(360deg); } }
 .spec-panel { margin: 0; background: white; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
 .spec-panel > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
 .spec-panel > div:last-child { border-bottom: 0; }

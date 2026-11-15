@@ -3,12 +3,24 @@
 import { useEffect, useRef, useState } from "react";
 import { imageFallbacks } from "@/lib/images";
 
-export function LotImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+export function LotImage({
+  src,
+  alt,
+  className,
+  onReady,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  onReady?: () => void;
+}) {
   const options = imageFallbacks(src);
   const [index, setIndex] = useState(0);
   const [tracked, setTracked] = useState(src);
   const ref = useRef<HTMLImageElement>(null);
   const failedSrc = useRef("");
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   if (tracked !== src) {
     failedSrc.current = "";
     setTracked(src);
@@ -22,9 +34,22 @@ export function LotImage({ src, alt, className }: { src: string; alt: string; cl
     setIndex((value) => value + 1);
   }
 
+  function ready() {
+    onReadyRef.current?.();
+  }
+
   useEffect(() => {
+    if (!current) {
+      ready();
+      return;
+    }
     const image = ref.current;
-    if (!image?.complete || image.naturalWidth > 0 || failedSrc.current === current) return;
+    if (!image?.complete) return;
+    if (image.naturalWidth > 0) {
+      ready();
+      return;
+    }
+    if (failedSrc.current === current) return;
     failedSrc.current = current;
     setIndex((value) => value + 1);
   }, [current]);
@@ -44,6 +69,9 @@ export function LotImage({ src, alt, className }: { src: string; alt: string; cl
       src={current}
       alt={alt}
       referrerPolicy="no-referrer"
+      onLoad={() => {
+        if (ref.current?.naturalWidth) ready();
+      }}
       onError={() => fail(current)}
     />
   );
