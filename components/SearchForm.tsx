@@ -195,6 +195,7 @@ export function SearchForm({
   yearTo,
   total,
   variant = "hero",
+  view,
 }: {
   values: Filters;
   makes: NamedCount[];
@@ -203,6 +204,7 @@ export function SearchForm({
   yearTo: number;
   total: number;
   variant?: "hero" | "page";
+  view?: 1 | 2 | 4;
 }) {
   const years: number[] = [];
   for (let year = yearTo; year >= yearMin; year -= 1) years.push(year);
@@ -230,11 +232,12 @@ export function SearchForm({
   }
 
   return (
-    <form key={`${values.category}|${values.source}|${values.make}|${values.model}|${values.yearFrom}|${values.yearTo}|${values.fuel}|${values.drive}|${values.milesFrom}|${values.milesTo}|${values.q}`} className={`search-panel search-panel--${variant}`} action="/search" method="get" onSubmit={onSubmit}>
+    <form key={`${values.category}|${values.source}|${values.make}|${values.model}|${values.yearFrom}|${values.yearTo}|${values.fuel}|${values.drive}|${values.milesFrom}|${values.milesTo}|${values.q}|${view || ""}`} className={`search-panel search-panel--${variant}`} action="/search" method="get" onSubmit={onSubmit}>
       <input type="hidden" name="category" defaultValue={values.category} />
       <input type="hidden" name="source" defaultValue={values.source} />
       <input type="hidden" name="fuel" defaultValue={values.fuel} />
       <input type="hidden" name="drive" defaultValue={values.drive} />
+      {view && view !== 4 ? <input type="hidden" name="view" defaultValue={String(view)} /> : null}
       <div className="tabs" role="tablist" aria-label="Категория">
         {TABS.map((tab) => (
           <button

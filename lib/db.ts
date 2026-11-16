@@ -31,6 +31,7 @@ function openDatabase(): DatabaseSync {
       model TEXT NOT NULL,
       model_key TEXT NOT NULL,
       series TEXT NOT NULL DEFAULT '',
+      name TEXT NOT NULL DEFAULT '',
       auction_at TEXT NOT NULL,
       timezone TEXT NOT NULL DEFAULT '',
       location TEXT NOT NULL DEFAULT '',
@@ -66,6 +67,7 @@ function openDatabase(): DatabaseSync {
   ensureColumn(db, "fuel_key", "ALTER TABLE lots ADD COLUMN fuel_key TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "drive_key", "ALTER TABLE lots ADD COLUMN drive_key TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "images", "ALTER TABLE lots ADD COLUMN images TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "name", "ALTER TABLE lots ADD COLUMN name TEXT NOT NULL DEFAULT ''");
   rekeyLots(db);
   return db;
 }
@@ -128,6 +130,8 @@ type LotRow = {
   make: string;
   model: string;
   series: string;
+  name?: string;
+  images?: string;
   auction_at: string;
   timezone: string;
   location: string;
@@ -152,6 +156,17 @@ type LotRow = {
   url: string;
 };
 
+function storedImages(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string" && item.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export function rowToLot(row: LotRow): Lot {
   return {
     id: row.id,
@@ -164,6 +179,8 @@ export function rowToLot(row: LotRow): Lot {
     make: row.make,
     model: row.model,
     series: row.series,
+    name: row.name || "",
+    images: storedImages(row.images),
     auctionAt: row.auction_at,
     timezone: row.timezone,
     location: row.location,
@@ -194,13 +211,13 @@ const INSERT = `INSERT OR REPLACE INTO lots (
   model, model_key, series, auction_at, timezone, location, city, state, odometer,
   odometer_unit, primary_damage, secondary_damage, title_doc, condition, keys, fuel,
   transmission, drive, engine, color, lane, current_bid, acv, image, url, seen_at,
-  fuel_key, drive_key
+  fuel_key, drive_key, name
 ) VALUES (
   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-  ?, ?
+  ?, ?, ?
 )`;
 
 function lotValues(lot: Lot, seenAt: number): Array<string | number | null> {
@@ -243,6 +260,7 @@ function lotValues(lot: Lot, seenAt: number): Array<string | number | null> {
     seenAt,
     fuelKey(lot.fuel),
     driveKey(lot.drive),
+    lot.name,
   ];
 }
 

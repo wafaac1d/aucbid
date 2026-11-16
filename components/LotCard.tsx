@@ -1,26 +1,36 @@
 import Link from "next/link";
-import { categoryLabel, formatMoney, formatOdometer, sourceLabel, translate } from "@/lib/format";
+import { categoryLabel, formatMoney, formatOdometer, sourceLabel, translate, vehicleTitle } from "@/lib/format";
 import type { Lot } from "@/lib/types";
 import { AuctionTime } from "./AuctionTime";
-import { LotImage } from "./LotImage";
+import { CardPhotos } from "./CardPhotos";
 
 export function LotCard({ lot }: { lot: Lot }) {
   const startsIn = new Date(lot.auctionAt).getTime() - Date.now();
   const soon = startsIn > 0 && startsIn < 48 * 60 * 60 * 1000;
-  const title = [lot.year || null, lot.make, lot.model].filter(Boolean).join(" ");
+  const title = vehicleTitle(lot);
   const damage = translate(lot.primaryDamage);
   const price = formatMoney(lot.currentBid ?? 0);
+  const href = `/lot/${lot.id}`;
 
   return (
     <article className="card">
-      <Link href={`/lot/${lot.id}`} className="card-link">
-        <div className="card-photo">
-          <LotImage src={lot.image} alt={title} />
-          <div className="card-badges">
-            <span className={`badge badge--${lot.source}`}>{sourceLabel(lot.source)}</span>
-            {soon ? <span className="badge badge--soon">Скоро</span> : null}
-          </div>
-        </div>
+      <div className="card-photo">
+        <CardPhotos
+          lotId={lot.id}
+          source={lot.source}
+          image={lot.image}
+          alt={title}
+          href={href}
+          cached={lot.images.length > 1 ? lot.images : []}
+          badges={
+            <div className="card-badges">
+              <span className={`badge badge--${lot.source}`}>{sourceLabel(lot.source)}</span>
+              {soon ? <span className="badge badge--soon">Скоро</span> : null}
+            </div>
+          }
+        />
+      </div>
+      <Link href={href} className="card-link">
         <div className="card-body">
           <p className="card-kicker">{categoryLabel(lot.category)}</p>
           <h3>{title}</h3>

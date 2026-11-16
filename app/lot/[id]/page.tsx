@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { LotCard } from "@/components/LotCard";
 import { LotGallery } from "@/components/LotGallery";
 import { getLot, relatedLots } from "@/lib/db";
-import { categoryLabel, displayName, formatMoney, formatOdometerDetail, nameKey, sourceLabel, translate } from "@/lib/format";
+import { categoryLabel, displayName, formatMoney, formatOdometerDetail, nameKey, sourceLabel, translate, vehicleTitle } from "@/lib/format";
 import { AuctionTime } from "@/components/AuctionTime";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const lot = getLot((await params).id);
   if (!lot) return { title: "Лот не найден" };
-  const title = [lot.year || null, lot.make, lot.model].filter(Boolean).join(" ");
+  const title = vehicleTitle(lot);
   return { title: `${title}, лот ${lot.lotNumber}` };
 }
 
@@ -41,7 +41,7 @@ function SpecPanel({ rows }: { rows: { label: string; value: ReactNode; price?: 
 export default async function LotPage({ params }: { params: Promise<{ id: string }> }) {
   const lot = getLot((await params).id);
   if (!lot) notFound();
-  const title = [lot.year || null, lot.make, lot.model].filter(Boolean).join(" ");
+  const title = vehicleTitle(lot);
   const related = relatedLots(lot);
   const place = [lot.city, lot.state].filter(Boolean).join(", ") || lot.location;
   const startsIn = new Date(lot.auctionAt).getTime() - Date.now();
@@ -58,7 +58,7 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
           <span className="badge badge--plain">{categoryLabel(lot.category)}</span>
         </div>
         <h1>{title}</h1>
-        {lot.series && lot.series.toLowerCase() !== lot.model.toLowerCase() ? <p className="series">{lot.series}</p> : null}
+        {lot.series && !title.toLowerCase().includes(lot.series.toLowerCase()) && lot.series.toLowerCase() !== lot.model.toLowerCase() ? <p className="series">{lot.series}</p> : null}
       </header>
       <div className="lot-layout">
         <LotGallery

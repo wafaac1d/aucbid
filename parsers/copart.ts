@@ -28,6 +28,7 @@ type CopartRaw = {
   make: string;
   model: string;
   series: string;
+  name: string;
   ad: number;
   tz: string;
   yard: string;
@@ -99,6 +100,7 @@ async function searchInPage(filters: string[], pageIndex: number, size: number):
         make: String(lot.mkn || ""),
         model: String(lot.lm || ""),
         series: String(lot.lmg || ""),
+        name: String(lot.ld || ""),
         ad: Number(lot.ad || 0),
         tz: String(lot.tz || ""),
         yard: String(lot.yn || ""),
@@ -171,6 +173,7 @@ async function directSearch(filters: string[], pageIndex: number, size: number):
         make: String(lot.mkn || ""),
         model: String(lot.lm || ""),
         series: String(lot.lmg || ""),
+        name: String(lot.ld || ""),
         ad: Number(lot.ad || 0),
         tz: String(lot.tz || ""),
         yard: String(lot.yn || ""),
@@ -218,6 +221,8 @@ function mapLot(raw: CopartRaw, category: Category): Lot | null {
     make: names.make,
     model: names.model === null ? displayName(raw.model) : names.model,
     series: displayName(raw.series),
+    name: displayName(raw.name),
+    images: [],
     auctionAt,
     timezone: raw.tz.trim().toUpperCase(),
     location: [raw.yard, city, state].filter(Boolean).join(", "),

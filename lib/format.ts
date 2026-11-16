@@ -109,6 +109,32 @@ export function displayName(raw: string): string {
     .join("");
 }
 
+function withTrim(model: string, series: string): string {
+  const trim = series.trim();
+  if (!trim || /^(all models|all other|unknown|n\/a|sidebyside|side by side|minivan|other)$/i.test(trim)) return model;
+  if (trim.length === 1 && trim.toUpperCase() !== "S") return model;
+  const fold = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const base = fold(model);
+  const extra = fold(trim);
+  if (!extra || extra === base || (base && base.includes(extra))) return model;
+  if (base && extra.includes(base)) return trim;
+  return `${model} ${trim}`.trim();
+}
+
+export function vehicleTitle(lot: {
+  year: number;
+  make: string;
+  model: string;
+  series: string;
+  name: string;
+  source: string;
+}): string {
+  const stored = lot.name.trim();
+  if (stored) return stored;
+  const model = lot.source === "iaai" ? withTrim(lot.model, lot.series) : lot.model;
+  return [lot.year || null, lot.make, model].filter(Boolean).join(" ");
+}
+
 const MAKE_ALIAS: Record<string, string> = {
   YAMA: "Yamaha",
   YAMAHA: "Yamaha",

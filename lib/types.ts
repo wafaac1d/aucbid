@@ -12,6 +12,8 @@ export type Lot = {
   make: string;
   model: string;
   series: string;
+  name: string;
+  images: string[];
   auctionAt: string;
   timezone: string;
   location: string;

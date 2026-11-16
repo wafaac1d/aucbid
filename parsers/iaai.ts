@@ -119,6 +119,8 @@ export function parseIaaiHtml(html: string, category: Category): Lot[] {
       make: names.make,
       model: names.model === null ? displayName(modal[6]) : names.model,
       series: displayName(modal[7]),
+      name: "",
+      images: [],
       auctionAt,
       timezone,
       location: place,
