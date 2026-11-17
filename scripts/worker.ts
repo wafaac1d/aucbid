@@ -1,3 +1,4 @@
+import { countLots } from "../lib/db";
 import { refreshEveryMs } from "../lib/digest";
 import { moscowSyncSlot } from "../lib/schedule";
 import { runSync } from "../lib/sync";
@@ -7,9 +8,16 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  console.log("Фоновая синхронизация запущена. При старте каталог не обновляется.");
   let lastRefresh = Date.now();
   let lastSlot = moscowSyncSlot();
+  if ((await countLots()) === 0) {
+    console.log("Таблица машин пуста. Запускаю полную синхронизацию.");
+    await runSync("full");
+    lastRefresh = Date.now();
+    lastSlot = moscowSyncSlot() ?? lastSlot;
+  } else {
+    console.log("Фоновая синхронизация запущена. Каталог уже есть, при старте он не обновляется.");
+  }
   let pendingFull: string | null = null;
   const every = refreshEveryMs();
   for (;;) {

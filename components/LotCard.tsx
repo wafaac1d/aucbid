@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { categoryLabel, formatMoney, formatOdometer, sourceLabel, translate, vehicleTitle } from "@/lib/format";
+import { auctionPlace, categoryLabel, formatMoney, formatOdometer, sourceLabel, translate, vehicleTitle } from "@/lib/format";
 import type { Lot } from "@/lib/types";
 import { AuctionTime } from "./AuctionTime";
 import { CardPhotos } from "./CardPhotos";
@@ -35,7 +35,7 @@ export function LotCard({ lot }: { lot: Lot }) {
           <p className="card-kicker">{categoryLabel(lot.category)}</p>
           <h3>{title}</h3>
           <AuctionTime iso={lot.auctionAt} soon={soon} />
-          <p className="card-meta">{[lot.city || lot.location, lot.state].filter(Boolean).join(", ")}</p>
+          <p className="card-meta">{auctionPlace(lot)}</p>
           <p className="card-meta">{[formatOdometer(lot.odometer, lot.odometerUnit), damage].filter((item) => item && item !== "—").join(" · ") || "Пробег не указан"}</p>
           <p className="card-price">
             <span>Ставка</span>

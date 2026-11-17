@@ -121,6 +121,13 @@ function withTrim(model: string, series: string): string {
   return `${model} ${trim}`.trim();
 }
 
+function titleHasTrim(title: string, trim: string): boolean {
+  const words = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const needle = words(trim);
+  if (!needle) return true;
+  return ` ${words(title)} `.includes(` ${needle} `);
+}
+
 export function vehicleTitle(lot: {
   year: number;
   make: string;
@@ -130,9 +137,9 @@ export function vehicleTitle(lot: {
   source: string;
 }): string {
   const stored = lot.name.trim();
-  if (stored) return stored;
-  const model = lot.source === "iaai" ? withTrim(lot.model, lot.series) : lot.model;
-  return [lot.year || null, lot.make, model].filter(Boolean).join(" ");
+  const built = [lot.year || null, lot.make, withTrim(lot.model, lot.series)].filter(Boolean).join(" ");
+  if (stored && titleHasTrim(stored, lot.series)) return stored;
+  return built || stored;
 }
 
 const MAKE_ALIAS: Record<string, string> = {
@@ -348,6 +355,18 @@ export function driveName(key: string): string {
 
 export function vinKey(vin: string): string {
   return vin.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export function auctionPlace(lot: { location: string; city: string; state: string }): string {
+  const location = lot.location.trim();
+  const city = lot.city.trim();
+  const state = lot.state.trim();
+  const suffix = city && state ? `, ${city}, ${state}` : "";
+  if (suffix && location.endsWith(suffix)) {
+    const yard = location.slice(0, -suffix.length).trim();
+    if (yard) return yard;
+  }
+  return location || [city, state].filter(Boolean).join(", ");
 }
 
 export function cleanText(value: string): string {

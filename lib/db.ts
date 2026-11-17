@@ -1,5 +1,3 @@
-import fs from "fs";
-import path from "path";
 import { types, Pool, type PoolClient, type QueryResultRow } from "pg";
 import { driveKey, foldMakeKeys, fuelKey, MILES_MAX, modelKey, nameKey, normalizeMake, vinKey } from "./format";
 import { canonicalLotNames, preferredModelName } from "./names";
@@ -234,7 +232,6 @@ async function ensureSchema(): Promise<void> {
       last_page INTEGER NOT NULL DEFAULT 0
     );
   `);
-  await importSqliteIfEmpty();
   await rekeyLots();
 }
 
@@ -296,76 +293,9 @@ async function rekeyLots(): Promise<void> {
   }
 }
 
-async function importSqliteIfEmpty(): Promise<void> {
-  const file = path.join(process.cwd(), "data", "aucbid.db");
-  if (!fs.existsSync(file)) return;
-  const client = await getPool().connect();
-  try {
-    await client.query("SELECT pg_advisory_lock(641209)");
-    const existing = await client.query<{ count: number }>("SELECT COUNT(*)::int AS count FROM lots");
-    if (Number(existing.rows[0]?.count) > 0) return;
-    const { DatabaseSync } = await import("node:sqlite");
-    let sqlite: InstanceType<typeof DatabaseSync> | null = null;
-    try {
-      sqlite = new DatabaseSync(file, { readOnly: true });
-      const lots = sqlite.prepare("SELECT * FROM lots").all() as Record<string, unknown>[];
-      const tx = txFrom(client);
-      await client.query("BEGIN");
-      const seenAt = Date.now();
-      await insertLots(
-        tx,
-        lots.map((row) => rowToLot(row as LotRow)),
-        seenAt,
-      );
-      const withImages = lots.filter((row): row is Record<string, unknown> & { id: unknown; images: string } => typeof row.images === "string" && row.images.length > 0);
-      const withSeen = lots.filter((row) => Number(row.seen_at) > 0);
-      for (let index = 0; index < Math.max(withImages.length, withSeen.length); index += 2000) {
-        const images = withImages.slice(index, index + 2000);
-        if (images.length > 0) {
-          await tx.run(
-            `UPDATE lots AS l SET images = v.images
-             FROM unnest(?::text[], ?::text[]) AS v(id, images)
-             WHERE l.id = v.id`,
-            [images.map((row) => String(row.id)), images.map((row) => row.images)],
-          );
-        }
-        const seen = withSeen.slice(index, index + 2000);
-        if (seen.length > 0) {
-          await tx.run(
-            `UPDATE lots AS l SET seen_at = v.seen_at::bigint
-             FROM unnest(?::text[], ?::text[]) AS v(id, seen_at)
-             WHERE l.id = v.id`,
-            [seen.map((row) => String(row.id)), seen.map((row) => String(Number(row.seen_at)))],
-          );
-        }
-      }
-      const digestTable = sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sync_digest'").get();
-      if (digestTable) {
-        const digests = sqlite.prepare("SELECT key, head, total, last_page FROM sync_digest").all() as Record<string, unknown>[];
-        for (const row of digests) {
-          await tx.run(
-            `INSERT INTO sync_digest (key, head, total, last_page) VALUES (?, ?, ?, ?)
-             ON CONFLICT (key) DO UPDATE SET head = EXCLUDED.head, total = EXCLUDED.total, last_page = EXCLUDED.last_page`,
-            [String(row.key), String(row.head || ""), Number(row.total) || 0, Number(row.last_page) || 0],
-          );
-        }
-      }
-      await client.query("COMMIT");
-      console.log(`Postgres получил ${lots.length} лотов из локального каталога`);
-    } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        /* the transaction may already be closed */
-      }
-      console.error(`Каталог из sqlite не перенесён: ${error instanceof Error ? error.message : error}`);
-    } finally {
-      sqlite?.close();
-    }
-  } finally {
-    await client.query("SELECT pg_advisory_unlock(641209)");
-    client.release();
-  }
+export async function countLots(): Promise<number> {
+  const row = await dbGet<{ count: number }>("SELECT COUNT(*)::int AS count FROM lots");
+  return Number(row?.count) || 0;
 }
 
 type LotRow = {

@@ -99,7 +99,7 @@ async function searchInPage(filters: string[], pageIndex: number, size: number):
         year: Number(lot.lcy || 0),
         make: String(lot.mkn || ""),
         model: String(lot.lm || ""),
-        series: String(lot.lmg || ""),
+        series: String(lot.ltd || ""),
         name: String(lot.ld || ""),
         ad: Number(lot.ad || 0),
         tz: String(lot.tz || ""),
@@ -172,7 +172,7 @@ async function directSearch(filters: string[], pageIndex: number, size: number):
         year: Number(lot.lcy || 0),
         make: String(lot.mkn || ""),
         model: String(lot.lm || ""),
-        series: String(lot.lmg || ""),
+        series: String(lot.ltd || ""),
         name: String(lot.ld || ""),
         ad: Number(lot.ad || 0),
         tz: String(lot.tz || ""),
@@ -210,6 +210,7 @@ function mapLot(raw: CopartRaw, category: Category): Lot | null {
   const unit = /^(k|km)$/i.test(raw.odoUom) ? "km" : "mi";
   const city = displayName(raw.city);
   const state = raw.state.trim().toUpperCase();
+  const yard = cleanText(raw.yard);
   return {
     id: `copart-${raw.ln}`,
     source: "copart",
@@ -225,7 +226,7 @@ function mapLot(raw: CopartRaw, category: Category): Lot | null {
     images: [],
     auctionAt,
     timezone: raw.tz.trim().toUpperCase(),
-    location: [raw.yard, city, state].filter(Boolean).join(", "),
+    location: yard || [city, state].filter(Boolean).join(", "),
     city,
     state,
     odometer: raw.odo > 0 ? Math.round(raw.odo) : null,

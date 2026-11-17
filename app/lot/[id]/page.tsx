@@ -4,8 +4,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LotCard } from "@/components/LotCard";
 import { LotGallery } from "@/components/LotGallery";
-import { getLot, relatedLots, saleSummary, searchSales } from "@/lib/db";
-import { categoryLabel, displayName, formatMoney, formatNumber, formatOdometer, formatOdometerDetail, modelKey, nameKey, sourceLabel, translate, vehicleTitle } from "@/lib/format";
+import { getLot, relatedLots, searchSales } from "@/lib/db";
+import { auctionPlace, categoryLabel, displayName, formatMoney, formatOdometer, formatOdometerDetail, modelKey, nameKey, sourceLabel, translate, vehicleTitle } from "@/lib/format";
 import { AuctionTime } from "@/components/AuctionTime";
 
 export const dynamic = "force-dynamic";
@@ -46,8 +46,7 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
   const historyMake = nameKey(lot.make);
   const historyModel = modelKey(lot.model);
   const history = historyModel ? await searchSales(historyMake, historyModel, 1, 6) : { items: [], total: 0 };
-  const historyStats = history.total > 0 ? await saleSummary(historyMake, historyModel) : null;
-  const place = [lot.city, lot.state].filter(Boolean).join(", ") || lot.location;
+  const place = auctionPlace(lot);
   const startsIn = new Date(lot.auctionAt).getTime() - Date.now();
   const soon = startsIn > 0 && startsIn < 48 * 60 * 60 * 1000;
 
@@ -62,12 +61,6 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
           <span className="badge badge--plain">{categoryLabel(lot.category)}</span>
         </div>
         <h1>{title}</h1>
-        {historyModel ? (
-          <p className="crumbs">
-            <Link href={`/archive?make=${historyMake}&model=${historyModel}`}>История продаж {lot.model || lot.make}</Link>
-            {historyStats?.average != null ? ` · средняя ${formatMoney(historyStats.average)} по ${formatNumber(historyStats.count)}` : ""}
-          </p>
-        ) : null}
         {lot.series && !title.toLowerCase().includes(lot.series.toLowerCase()) && lot.series.toLowerCase() !== lot.model.toLowerCase() ? <p className="series">{lot.series}</p> : null}
       </header>
       <div className="lot-layout">
@@ -119,6 +112,11 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
           <a className="external" href={lot.url} target="_blank" rel="noreferrer">
             Открыть лот на {sourceLabel(lot.source)}
           </a>
+          {historyModel ? (
+            <Link className="external" href={`/archive?make=${historyMake}&model=${historyModel}`}>
+              История продаж
+            </Link>
+          ) : null}
         </aside>
       </div>
       {history.items.length > 0 ? (
