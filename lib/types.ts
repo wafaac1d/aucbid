@@ -58,3 +58,31 @@ export type NamedCount = {
   name: string;
   count: number;
 };
+
+export type Sale = {
+  id: string;
+  source: Source;
+  category: Category;
+  lotNumber: string;
+  vin: string;
+  year: number;
+  make: string;
+  model: string;
+  name: string;
+  price: number;
+  odometer: number | null;
+  odometerUnit: "mi" | "km";
+  auctionAt: string;
+  city: string;
+  state: string;
+  location: string;
+  image: string;
+  url: string;
+};
+
+export type SaleSummary = {
+  count: number;
+  average: number | null;
+  min: number | null;
+  max: number | null;
+};

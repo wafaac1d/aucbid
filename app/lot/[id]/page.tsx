@@ -4,14 +4,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LotCard } from "@/components/LotCard";
 import { LotGallery } from "@/components/LotGallery";
-import { getLot, relatedLots } from "@/lib/db";
-import { categoryLabel, displayName, formatMoney, formatOdometerDetail, nameKey, sourceLabel, translate, vehicleTitle } from "@/lib/format";
+import { getLot, relatedLots, saleSummary, searchSales } from "@/lib/db";
+import { categoryLabel, displayName, formatMoney, formatNumber, formatOdometer, formatOdometerDetail, modelKey, nameKey, sourceLabel, translate, vehicleTitle } from "@/lib/format";
 import { AuctionTime } from "@/components/AuctionTime";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
-  const lot = getLot((await params).id);
+  const lot = await getLot((await params).id);
   if (!lot) return { title: "Лот не найден" };
   const title = vehicleTitle(lot);
   return { title: `${title}, лот ${lot.lotNumber}` };
@@ -39,10 +39,14 @@ function SpecPanel({ rows }: { rows: { label: string; value: ReactNode; price?: 
 }
 
 export default async function LotPage({ params }: { params: Promise<{ id: string }> }) {
-  const lot = getLot((await params).id);
+  const lot = await getLot((await params).id);
   if (!lot) notFound();
   const title = vehicleTitle(lot);
-  const related = relatedLots(lot);
+  const related = await relatedLots(lot);
+  const historyMake = nameKey(lot.make);
+  const historyModel = modelKey(lot.model);
+  const history = historyModel ? await searchSales(historyMake, historyModel, 1, 6) : { items: [], total: 0 };
+  const historyStats = history.total > 0 ? await saleSummary(historyMake, historyModel) : null;
   const place = [lot.city, lot.state].filter(Boolean).join(", ") || lot.location;
   const startsIn = new Date(lot.auctionAt).getTime() - Date.now();
   const soon = startsIn > 0 && startsIn < 48 * 60 * 60 * 1000;
@@ -58,6 +62,12 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
           <span className="badge badge--plain">{categoryLabel(lot.category)}</span>
         </div>
         <h1>{title}</h1>
+        {historyModel ? (
+          <p className="crumbs">
+            <Link href={`/archive?make=${historyMake}&model=${historyModel}`}>История продаж {lot.model || lot.make}</Link>
+            {historyStats?.average != null ? ` · средняя ${formatMoney(historyStats.average)} по ${formatNumber(historyStats.count)}` : ""}
+          </p>
+        ) : null}
         {lot.series && !title.toLowerCase().includes(lot.series.toLowerCase()) && lot.series.toLowerCase() !== lot.model.toLowerCase() ? <p className="series">{lot.series}</p> : null}
       </header>
       <div className="lot-layout">
@@ -111,6 +121,36 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
           </a>
         </aside>
       </div>
+      {history.items.length > 0 ? (
+        <section className="section section--tight">
+          <div className="section-head">
+            <h2>За сколько уходили</h2>
+            <Link href={`/archive?make=${historyMake}&model=${historyModel}`}>Весь архив</Link>
+          </div>
+          <div className="sales-wrap">
+            <table className="sales">
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Авто</th>
+                  <th>Пробег</th>
+                  <th>Цена</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.items.map((sale) => (
+                  <tr key={sale.id}>
+                    <td>{new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", year: "numeric", timeZone: "Europe/Minsk" }).format(new Date(sale.auctionAt))}</td>
+                    <td>{sale.name || [sale.year || null, sale.make, sale.model].filter(Boolean).join(" ")}</td>
+                    <td>{formatOdometer(sale.odometer, sale.odometerUnit)}</td>
+                    <td className="price">{formatMoney(sale.price)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
       {related.length > 0 ? (
         <section className="section section--tight">
           <div className="section-head">

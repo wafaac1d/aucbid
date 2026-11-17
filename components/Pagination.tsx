@@ -1,13 +1,13 @@
 import Link from "next/link";
 
-export function Pagination({ page, pages, query }: { page: number; pages: number; query: string }) {
+export function Pagination({ page, pages, query, path = "/search" }: { page: number; pages: number; query: string; path?: string }) {
   if (pages <= 1) return null;
   const href = (next: number) => {
     const params = new URLSearchParams(query);
     if (next > 1) params.set("page", String(next));
     else params.delete("page");
     const value = params.toString();
-    return value ? `/search?${value}` : "/search";
+    return value ? `${path}?${value}` : path;
   };
   const windowStart = Math.max(1, page - 2);
   const windowEnd = Math.min(pages, windowStart + 4);

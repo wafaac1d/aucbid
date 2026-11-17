@@ -1,4 +1,4 @@
-import { getDb, pruneSource, saveLots } from "./db";
+import { dbGet, dbRun, dbTx, pruneSource, saveLots } from "./db";
 import type { CatalogProbe, PageStamp } from "./digest";
 import { refreshEveryMs } from "./digest";
 import { pullCopart } from "../parsers/copart";
@@ -25,35 +25,8 @@ type SyncRow = {
   message: string;
 };
 
-function ensureSyncTable(): void {
-  const db = getDb();
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sync_state (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      started_at INTEGER,
-      finished_at INTEGER,
-      status TEXT NOT NULL DEFAULT 'idle',
-      message TEXT NOT NULL DEFAULT ''
-    );
-    INSERT OR IGNORE INTO sync_state (id, status, message) VALUES (1, 'idle', '');
-    CREATE TABLE IF NOT EXISTS sync_digest (
-      key TEXT PRIMARY KEY,
-      head TEXT NOT NULL DEFAULT '',
-      total INTEGER NOT NULL DEFAULT 0,
-      last_page INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-  const columns = db.prepare("PRAGMA table_info(sync_state)").all() as { name: string }[];
-  if (!columns.some((column) => column.name === "last_full_at")) {
-    db.exec("ALTER TABLE sync_state ADD COLUMN last_full_at INTEGER");
-  }
-}
-
-function readRow(): SyncRow {
-  ensureSyncTable();
-  const row = getDb()
-    .prepare("SELECT started_at, finished_at, status, message FROM sync_state WHERE id = 1")
-    .get() as SyncRow | undefined;
+async function readRow(): Promise<SyncRow> {
+  const row = await dbGet<SyncRow>("SELECT started_at, finished_at, status, message FROM sync_state WHERE id = 1");
   return {
     started_at: row?.started_at ?? null,
     finished_at: row?.finished_at ?? null,
@@ -78,8 +51,8 @@ export function toPublicStatus(row: SyncRow, now = Date.now()): SyncPublicStatus
   };
 }
 
-export function getSyncStatus(): SyncPublicStatus {
-  return toPublicStatus(readRow());
+export async function getSyncStatus(): Promise<SyncPublicStatus> {
+  return toPublicStatus(await readRow());
 }
 
 const MAX_PAGES = 2000;
@@ -91,83 +64,50 @@ export function clampPages(raw: string | undefined): number {
   return Math.min(MAX_PAGES, Math.floor(pages));
 }
 
-function tryBegin(ignoreCooldown: boolean): { accepted: boolean; startedAt: number; status: SyncPublicStatus } {
-  ensureSyncTable();
-  const db = getDb();
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const row = db.prepare("SELECT started_at, finished_at, status, message FROM sync_state WHERE id = 1").get() as SyncRow;
+async function tryBegin(ignoreCooldown: boolean): Promise<{ accepted: boolean; startedAt: number; status: SyncPublicStatus }> {
+  return dbTx(async (tx) => {
+    const row = await tx.get<SyncRow>("SELECT started_at, finished_at, status, message FROM sync_state WHERE id = 1 FOR UPDATE");
     const now = Date.now();
-    const status = toPublicStatus(
-      {
-        started_at: row?.started_at ?? null,
-        finished_at: row?.finished_at ?? null,
-        status: row?.status || "idle",
-        message: row?.message || "",
-      },
-      now,
-    );
+    const current = {
+      started_at: row?.started_at ?? null,
+      finished_at: row?.finished_at ?? null,
+      status: row?.status || "idle",
+      message: row?.message || "",
+    };
+    const status = toPublicStatus(current, now);
     const blocked = (status.running || status.retryAfterMs > 0) && !ignoreCooldown;
-    if (blocked) {
-      db.exec("COMMIT");
-      return { accepted: false, startedAt: row?.started_at ?? now, status };
-    }
-    db.prepare("UPDATE sync_state SET started_at = ?, finished_at = NULL, status = 'running', message = '' WHERE id = 1").run(now);
-    db.exec("COMMIT");
-    return { accepted: true, startedAt: now, status: getSyncStatus() };
-  } catch (error) {
-    try {
-      db.exec("ROLLBACK");
-    } catch {
-      /* the transaction may already be closed */
-    }
-    throw error;
-  }
+    if (blocked) return { accepted: false, startedAt: current.started_at ?? now, status };
+    await tx.run("UPDATE sync_state SET started_at = ?, finished_at = NULL, status = 'running', message = '' WHERE id = 1", [now]);
+    return { accepted: true, startedAt: now, status: toPublicStatus({ ...current, started_at: now, finished_at: null, status: "running", message: "" }, now) };
+  });
 }
 
-function finishSync(startedAt: number, ok: boolean, message: string, mode: SyncMode): void {
-  ensureSyncTable();
+async function finishSync(startedAt: number, ok: boolean, message: string, mode: SyncMode): Promise<void> {
   const finishedAt = Date.now();
-  getDb()
-    .prepare(
-      `UPDATE sync_state
-       SET finished_at = ?, status = ?, message = ?, last_full_at = CASE WHEN ? = 1 THEN ? ELSE last_full_at END
-       WHERE id = 1 AND started_at = ? AND status = 'running'`,
-    )
-    .run(finishedAt, ok ? "ok" : "error", message.slice(0, 500), ok && mode === "full" ? 1 : 0, finishedAt, startedAt);
+  await dbRun(
+    `UPDATE sync_state
+     SET finished_at = ?, status = ?, message = ?, last_full_at = CASE WHEN ? = 1 THEN ? ELSE last_full_at END
+     WHERE id = 1 AND started_at = ? AND status = 'running'`,
+    [finishedAt, ok ? "ok" : "error", message.slice(0, 500), ok && mode === "full" ? 1 : 0, finishedAt, startedAt],
+  );
 }
 
 export type SyncMode = "full" | "refresh";
 
-const FULL_SYNC_MAX_AGE_MS = 18 * 60 * 60 * 1000;
-
-export function needsFullSync(now = Date.now()): boolean {
-  ensureSyncTable();
-  const count = getDb().prepare("SELECT COUNT(*) AS count FROM lots").get() as { count: number };
-  if (!count.count) return true;
-  const row = getDb().prepare("SELECT last_full_at FROM sync_state WHERE id = 1").get() as { last_full_at: number | null } | undefined;
-  if (row?.last_full_at == null) return false;
-  return now - row.last_full_at > FULL_SYNC_MAX_AGE_MS;
-}
-
-function readStamp(key: string): PageStamp | null {
-  ensureSyncTable();
-  const row = getDb().prepare("SELECT head, total, last_page FROM sync_digest WHERE key = ?").get(key) as
-    | { head: string; total: number; last_page: number }
-    | undefined;
+async function readStamp(key: string): Promise<PageStamp | null> {
+  const row = await dbGet<{ head: string; total: number; last_page: number }>("SELECT head, total, last_page FROM sync_digest WHERE key = ?", [key]);
   if (!row) return null;
-  return { head: row.head, total: row.total, lastPage: row.last_page };
+  return { head: row.head, total: Number(row.total), lastPage: Number(row.last_page) };
 }
 
-function writeStamp(key: string, patch: Partial<PageStamp>): void {
-  const current = readStamp(key) ?? { head: "", total: 0, lastPage: 0 };
+async function writeStamp(key: string, patch: Partial<PageStamp>): Promise<void> {
+  const current = (await readStamp(key)) ?? { head: "", total: 0, lastPage: 0 };
   const next = { ...current, ...patch };
-  getDb()
-    .prepare(
-      `INSERT INTO sync_digest (key, head, total, last_page) VALUES (?, ?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET head = excluded.head, total = excluded.total, last_page = excluded.last_page`,
-    )
-    .run(key, next.head, next.total, next.lastPage);
+  await dbRun(
+    `INSERT INTO sync_digest (key, head, total, last_page) VALUES (?, ?, ?, ?)
+     ON CONFLICT (key) DO UPDATE SET head = EXCLUDED.head, total = EXCLUDED.total, last_page = EXCLUDED.last_page`,
+    [key, next.head, next.total, next.lastPage],
+  );
 }
 
 function catalogProbe(mode: SyncMode): CatalogProbe {
@@ -191,7 +131,7 @@ export async function executeSync(
 
   const iaai = await pullIaai(pages, log, save, probe);
   if (mode === "full" && iaai.complete) {
-    const removed = pruneSource("iaai", seenAt);
+    const removed = await pruneSource("iaai", seenAt);
     log(`IAAI сохранено ${iaai.saved}, снято с каталога ${removed}`);
   } else if (mode === "full") {
     log(`IAAI загружен не до конца (${iaai.saved}). Прежние лоты этого аукциона оставлены`);
@@ -202,7 +142,7 @@ export async function executeSync(
   try {
     const copart = await pullCopart(pages, log, save, probe);
     if (mode === "full" && copart.complete) {
-      const removed = pruneSource("copart", seenAt);
+      const removed = await pruneSource("copart", seenAt);
       log(`Copart сохранено ${copart.saved}, снято с каталога ${removed}`);
     } else if (mode === "full") {
       log(`Copart загружен не до конца (${copart.saved}). Прежние лоты этого аукциона оставлены`);
@@ -220,45 +160,50 @@ export async function executeSync(
 
 let syncing = false;
 
-function beginOrBusy(ignoreCooldown: boolean): { accepted: boolean; startedAt: number; status: SyncPublicStatus } {
+async function beginOrBusy(ignoreCooldown: boolean): Promise<{ accepted: boolean; startedAt: number; status: SyncPublicStatus }> {
   try {
-    return tryBegin(ignoreCooldown);
+    return await tryBegin(ignoreCooldown);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!/busy|locked/i.test(message)) throw error;
-    return { accepted: false, startedAt: Date.now(), status: getSyncStatus() };
+    return { accepted: false, startedAt: Date.now(), status: await getSyncStatus() };
   }
 }
 
-export function requestSync(options?: { ignoreCooldown?: boolean; mode?: SyncMode }): { accepted: boolean; status: SyncPublicStatus } {
-  if (syncing) return { accepted: false, status: getSyncStatus() };
-  const mode = options?.mode ?? "full";
-  const start = beginOrBusy(Boolean(options?.ignoreCooldown));
-  if (!start.accepted) return { accepted: false, status: start.status };
+export async function runSync(mode: SyncMode): Promise<boolean> {
+  if (syncing) return false;
+  const start = await beginOrBusy(mode === "full");
+  if (!start.accepted) return false;
   syncing = true;
   const pages = clampPages(process.env.SYNC_PAGES);
-  void executeSync(pages, (message) => console.log(message), mode)
-    .then((result) => finishSync(start.startedAt, result.ok, result.message, mode))
-    .catch((error) => finishSync(start.startedAt, false, error instanceof Error ? error.message : String(error), mode))
-    .finally(() => {
-      syncing = false;
-    });
-  return { accepted: true, status: getSyncStatus() };
+  try {
+    const result = await executeSync(pages, (message) => console.log(message), mode);
+    await finishSync(start.startedAt, result.ok, result.message, mode);
+    return true;
+  } catch (error) {
+    await finishSync(start.startedAt, false, error instanceof Error ? error.message : String(error), mode);
+    return true;
+  } finally {
+    syncing = false;
+  }
 }
 
 export async function runCliSync(pages: number): Promise<number> {
-  const start = beginOrBusy(false);
+  const start = await beginOrBusy(false);
   if (!start.accepted) {
     if (start.status.running) console.log("Синхронизация уже выполняется, повторный запрос не отправлен");
     else console.log(`Данные обновлялись меньше 5 минут назад. Повтор через ${Math.ceil(start.status.retryAfterMs / 1000)} с`);
     return 0;
   }
+  syncing = true;
   try {
     const result = await executeSync(pages, (message) => console.log(message), "full");
-    finishSync(start.startedAt, result.ok, result.message, "full");
+    await finishSync(start.startedAt, result.ok, result.message, "full");
     return result.ok ? 0 : 1;
   } catch (error) {
-    finishSync(start.startedAt, false, error instanceof Error ? error.message : String(error), "full");
+    await finishSync(start.startedAt, false, error instanceof Error ? error.message : String(error), "full");
     throw error;
+  } finally {
+    syncing = false;
   }
 }

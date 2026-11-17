@@ -307,6 +307,17 @@ img { max-width: 100%; display: block; }
 .external { display: inline-flex; align-items: center; justify-content: center; height: 48px; padding: 0 18px; background: var(--blue); color: white; font-weight: 800; }
 .lot-aside .external { width: 100%; }
 
+.archive-stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 16px; }
+.archive-stats div { background: white; border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; min-width: 140px; }
+.archive-stats strong { display: block; font-size: 22px; letter-spacing: -0.03em; }
+.archive-stats span { color: var(--muted); font-size: 13px; }
+.sales-wrap { overflow-x: auto; background: white; border: 1px solid var(--line); border-radius: 18px; }
+.sales { width: 100%; border-collapse: collapse; }
+.sales th { text-align: left; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); padding: 12px 14px; }
+.sales td { padding: 12px 14px; border-top: 1px solid var(--line); vertical-align: top; }
+.sales .price { text-align: right; font-weight: 800; white-space: nowrap; }
+.sales a { font-weight: 700; }
+
 .footer {
   display: flex; justify-content: space-between; gap: 24px;
   margin-top: 28px; padding: 28px; background: var(--navy); color: #d5dceb;

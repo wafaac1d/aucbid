@@ -314,7 +314,7 @@ async function openBrowser(): Promise<{ page: Page; browser: Browser }> {
 export async function pullCopart(
   pages: number,
   log: (message: string) => void,
-  onPage: (lots: Lot[]) => number,
+  onPage: (lots: Lot[]) => number | Promise<number>,
   probe?: CatalogProbe,
 ): Promise<PullResult> {
   let search: (filters: string[], page: number, size: number) => Promise<CopartPage> = directSearch;
@@ -352,7 +352,7 @@ export async function pullCopart(
   try {
     for (const query of QUERIES) {
       const key = `copart:${query.label}`;
-      const stored = probe?.read(key) ?? null;
+      const stored = (await probe?.read(key)) ?? null;
       let finished = false;
       let coveredUntil = -1;
       let headDigest = "";
@@ -375,7 +375,7 @@ export async function pullCopart(
             break;
           }
         }
-        saved += onPage(lots);
+        saved += await onPage(lots);
         log(`Copart ${query.label}: страница ${page + 1}, лотов с датой ${lots.length} из ${result.total}`);
         coveredUntil = page;
         if (result.lots.length < 100 || (page + 1) * 100 >= result.total) {
@@ -390,22 +390,22 @@ export async function pullCopart(
         const tail = await loadPage(query.filters, tailIndex, query.label);
         if (tail) {
           const tailLots = tail.lots.map((lot) => mapLot(lot, query.category)).filter((lot): lot is Lot => Boolean(lot));
-          saved += onPage(tailLots);
+          saved += await onPage(tailLots);
           log(`Copart ${query.label}: хвост, страница ${tailIndex + 1}, лотов с датой ${tailLots.length}`);
           await sleep(700);
           if (tail.lots.length >= 100) {
             const extra = await loadPage(query.filters, tailIndex + 1, query.label);
             if (extra && extra.lots.length > 0) {
               const extraLots = extra.lots.map((lot) => mapLot(lot, query.category)).filter((lot): lot is Lot => Boolean(lot));
-              saved += onPage(extraLots);
+              saved += await onPage(extraLots);
               lastPage = tailIndex + 1;
               log(`Copart ${query.label}: новая последняя страница ${tailIndex + 2}`);
             }
           }
         }
       }
-      if (probe && headDigest && lastPage >= 0) probe.write(key, { head: headDigest, total, lastPage });
-      else if (probe && headDigest) probe.write(key, { head: headDigest, total });
+      if (probe && headDigest && lastPage >= 0) await probe.write(key, { head: headDigest, total, lastPage });
+      else if (probe && headDigest) await probe.write(key, { head: headDigest, total });
       if (!finished) {
         complete = false;
         log(`Copart ${query.label}: достигнут предел страниц, выборка неполная`);

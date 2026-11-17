@@ -161,7 +161,7 @@ function listedCount(html: string): number {
 export async function pullIaai(
   pages: number,
   log: (message: string) => void,
-  onPage: (lots: Lot[]) => number,
+  onPage: (lots: Lot[]) => number | Promise<number>,
   probe?: CatalogProbe,
 ): Promise<PullResult> {
   let complete = true;
@@ -185,7 +185,7 @@ export async function pullIaai(
 
   for (const query of IAAI_QUERIES) {
     const key = `iaai:${query.label}`;
-    const stored = probe?.read(key) ?? null;
+    const stored = (await probe?.read(key)) ?? null;
     let finished = false;
     let coveredUntil = 0;
     let headDigest = "";
@@ -206,7 +206,7 @@ export async function pullIaai(
           break;
         }
       }
-      saved += onPage(lots);
+      saved += await onPage(lots);
       log(`IAAI ${query.label}: страница ${page}, лотов с датой ${lots.length}`);
       coveredUntil = page;
       if (listedCount(html) < 100) {
@@ -216,7 +216,7 @@ export async function pullIaai(
       await sleep(refresh ? 700 : 350);
     }
     if (probe && headDigest) {
-      probe.write(key, {
+      await probe.write(key, {
         head: headDigest,
         ...(probe.mode === "full" && finished ? { lastPage: Math.max(coveredUntil, 1) } : {}),
       });
@@ -225,13 +225,13 @@ export async function pullIaai(
       const tailHtml = await loadPage(query.facets, stored.lastPage, query.label);
       if (tailHtml) {
         const tailLots = parseIaaiHtml(tailHtml, query.category);
-        saved += onPage(tailLots);
+        saved += await onPage(tailLots);
         log(`IAAI ${query.label}: хвост, страница ${stored.lastPage}, лотов с датой ${tailLots.length}`);
         if (listedCount(tailHtml) >= 100) {
           const extraHtml = await loadPage(query.facets, stored.lastPage + 1, query.label);
           if (extraHtml && listedCount(extraHtml) > 0) {
-            saved += onPage(parseIaaiHtml(extraHtml, query.category));
-            probe?.write(key, { lastPage: stored.lastPage + 1 });
+            saved += await onPage(parseIaaiHtml(extraHtml, query.category));
+            await probe?.write(key, { lastPage: stored.lastPage + 1 });
             log(`IAAI ${query.label}: новая последняя страница ${stored.lastPage + 1}`);
           }
         }

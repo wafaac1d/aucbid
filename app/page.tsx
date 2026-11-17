@@ -22,13 +22,13 @@ const homeFilters: Filters = {
   page: 1,
 };
 
-export default function HomePage() {
-  const counts = categoryCounts();
+export default async function HomePage() {
+  const counts = await categoryCounts();
   const totalLots = counts.car + counts.motorcycle + counts.atv;
-  const upcoming = searchLots({ ...homeFilters, category: "" }, 8);
-  const makes = listMakes({ category: "car", source: "" });
-  const years = yearBounds({ category: "car", source: "" });
-  const cars = searchLots(homeFilters, 1);
+  const upcoming = await searchLots({ ...homeFilters, category: "" }, 8);
+  const makes = await listMakes({ category: "car", source: "" });
+  const years = await yearBounds({ category: "car", source: "" });
+  const cars = await searchLots(homeFilters, 1);
 
   return (
     <main>

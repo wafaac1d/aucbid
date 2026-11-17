@@ -6,8 +6,8 @@ export type PageStamp = { head: string; total: number; lastPage: number };
 export type CatalogProbe = {
   mode: "full" | "refresh";
   headPages: number;
-  read(key: string): PageStamp | null;
-  write(key: string, patch: Partial<PageStamp>): void;
+  read(key: string): Promise<PageStamp | null>;
+  write(key: string, patch: Partial<PageStamp>): Promise<void>;
 };
 
 export function lotPageDigest(lots: Pick<Lot, "id" | "currentBid" | "auctionAt" | "odometer" | "titleDoc">[]): string {

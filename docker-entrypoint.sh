@@ -6,16 +6,43 @@ mkdir -p /app/data
 # Railway's proxy can only reach 0.0.0.0:$PORT.
 export HOSTNAME=0.0.0.0
 
-run() {
+as_node() {
   if chown -R node:node /app/data 2>/dev/null; then
-    exec runuser -u node -- "$@"
+    runuser -u node -- "$@"
+  else
+    "$@"
   fi
-  exec "$@"
 }
 
 if [ "$1" = "sync" ]; then
   shift
-  run /opt/tools/node_modules/.bin/tsx /app/scripts/sync.ts "$@"
+  as_node /opt/tools/node_modules/.bin/tsx /app/scripts/sync.ts "$@"
+  exit $?
 fi
 
-run node /app/server.js
+if [ "$1" = "worker" ]; then
+  shift
+  as_node /opt/tools/node_modules/.bin/tsx /app/scripts/worker.ts "$@"
+  exit $?
+fi
+
+as_node /bin/sh -c '
+  /opt/tools/node_modules/.bin/tsx /app/scripts/worker.ts &
+  worker=$!
+  trap "kill $worker 2>/dev/null || true" TERM INT
+  node /app/server.js &
+  server=$!
+  trap "kill $worker $server 2>/dev/null || true" TERM INT
+  wait $server
+  status=$?
+  kill $worker 2>/dev/null || true
+  wait $worker 2>/dev/null || true
+  exit $status
+' &
+child=$!
+trap 'kill "$child" 2>/dev/null || true' TERM INT
+set +e
+wait "$child"
+status=$?
+kill "$child" 2>/dev/null || true
+exit "$status"

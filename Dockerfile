@@ -23,7 +23,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium ca-certificates fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/tools \
-    && npm install --prefix /opt/tools tsx@4.20.5 puppeteer-core@24.23.0 \
+    && npm install --prefix /opt/tools tsx@4.20.5 puppeteer-core@24.23.0 pg@8.23.1 \
     && npm cache clean --force
 
 COPY --from=build /app/.next/standalone ./

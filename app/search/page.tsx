@@ -25,14 +25,14 @@ export default async function SearchPage({
   const params = await searchParams;
   const filters = filtersFromParams(params);
   const view = listView(params.view);
-  const result = searchLots(filters, PAGE_SIZE);
+  const result = await searchLots(filters, PAGE_SIZE);
   const pages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
   const safePage = Math.min(filters.page, pages);
-  const items = safePage === filters.page ? result.items : searchLots({ ...filters, page: safePage }, PAGE_SIZE).items;
+  const items = safePage === filters.page ? result.items : (await searchLots({ ...filters, page: safePage }, PAGE_SIZE)).items;
   const scope = { category: filters.category, source: filters.source };
-  const makes = listMakes(scope);
-  const models = listModels({ ...scope, make: filters.make });
-  const years = yearBounds(scope);
+  const makes = await listMakes(scope);
+  const models = await listModels({ ...scope, make: filters.make });
+  const years = await yearBounds(scope);
   const queryParams = new URLSearchParams(filtersToQuery({ ...filters, page: 1 }));
   if (view !== 4) queryParams.set("view", String(view));
   const query = queryParams.toString();
@@ -70,7 +70,15 @@ export default async function SearchPage({
               <h1>Найдено {formatNumber(result.total)}</h1>
               <ViewSwitch query={filtersToQuery(filters, safePage)} view={view} />
             </div>
-            <p className="crumbs">{crumbs.join(" · ")}</p>
+            <p className="crumbs">
+              {crumbs.join(" · ")}
+              {filters.make && filters.model ? (
+                <>
+                  {crumbs.length ? " · " : ""}
+                  <a href={`/archive?make=${filters.make}&model=${filters.model}`}>История продаж</a>
+                </>
+              ) : null}
+            </p>
           </div>
         </div>
         {items.length === 0 ? (

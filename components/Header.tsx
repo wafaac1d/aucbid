@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/search?category=car", label: "Авто", category: "car" },
   { href: "/search?category=motorcycle", label: "Мото", category: "motorcycle" },
   { href: "/search?category=atv", label: "ATV", category: "atv" },
+  { href: "/archive", label: "Архив", category: "archive" },
 ];
 
 export function Header() {
@@ -25,7 +26,7 @@ export function Header() {
       </Link>
       <nav className="nav" aria-label="Разделы">
         {LINKS.map((link) => {
-          const active = pathname === "/search" && category === link.category;
+          const active = link.category === "archive" ? pathname === "/archive" : pathname === "/search" && category === link.category;
           return (
             <Link key={link.href} href={link.href} className={active ? "is-active" : undefined} aria-current={active ? "page" : undefined}>
               {link.label}
