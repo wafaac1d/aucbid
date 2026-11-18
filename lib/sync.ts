@@ -1,4 +1,5 @@
-import { dbGet, dbRun, dbTx, pruneSource, saveLots } from "./db";
+import { countFreshLots, countSeenLots, dbGet, dbRun, dbTx, pruneSource, saveLots } from "./db";
+import type { Source } from "./types";
 import type { CatalogProbe, PageStamp } from "./digest";
 import { refreshEveryMs } from "./digest";
 import { pullCopart } from "../parsers/copart";
@@ -110,6 +111,22 @@ async function writeStamp(key: string, patch: Partial<PageStamp>): Promise<void>
   );
 }
 
+async function pruneIfKept(
+  log: (message: string) => void,
+  label: string,
+  source: Source,
+  seenAt: number,
+  before: number,
+): Promise<void> {
+  const kept = await countSeenLots(source, seenAt);
+  if (before >= 200 && kept < before * 0.5) {
+    log(`${label}: в этой выборке ${kept} лотов, в каталоге было ${before}. Выборка слишком короткая, старые лоты оставлены`);
+    return;
+  }
+  const removed = await pruneSource(source, seenAt);
+  log(`${label} сохранено ${kept}, снято с каталога ${removed}`);
+}
+
 function catalogProbe(mode: SyncMode): CatalogProbe {
   return { mode, headPages: REFRESH_HEAD_PAGES, read: readStamp, write: writeStamp };
 }
@@ -129,10 +146,10 @@ export async function executeSync(
   }
   const save = (lots: Parameters<typeof saveLots>[0]) => saveLots(lots, seenAt);
 
+  const iaaiBefore = mode === "full" ? await countFreshLots("iaai") : 0;
   const iaai = await pullIaai(pages, log, save, probe);
   if (mode === "full" && iaai.complete) {
-    const removed = await pruneSource("iaai", seenAt);
-    log(`IAAI сохранено ${iaai.saved}, снято с каталога ${removed}`);
+    await pruneIfKept(log, "IAAI", "iaai", seenAt, iaaiBefore);
   } else if (mode === "full") {
     log(`IAAI загружен не до конца (${iaai.saved}). Прежние лоты этого аукциона оставлены`);
   } else {
@@ -140,10 +157,10 @@ export async function executeSync(
   }
 
   try {
+    const copartBefore = mode === "full" ? await countFreshLots("copart") : 0;
     const copart = await pullCopart(pages, log, save, probe);
     if (mode === "full" && copart.complete) {
-      const removed = await pruneSource("copart", seenAt);
-      log(`Copart сохранено ${copart.saved}, снято с каталога ${removed}`);
+      await pruneIfKept(log, "Copart", "copart", seenAt, copartBefore);
     } else if (mode === "full") {
       log(`Copart загружен не до конца (${copart.saved}). Прежние лоты этого аукциона оставлены`);
     } else {

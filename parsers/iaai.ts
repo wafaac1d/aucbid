@@ -187,6 +187,7 @@ export async function pullIaai(
     const key = `iaai:${query.label}`;
     const stored = (await probe?.read(key)) ?? null;
     let finished = false;
+    let blocked = false;
     let coveredUntil = 0;
     let headDigest = "";
     for (let page = 1; page <= pageLimit; page += 1) {
@@ -209,13 +210,20 @@ export async function pullIaai(
       saved += await onPage(lots);
       log(`IAAI ${query.label}: страница ${page}, лотов с датой ${lots.length}`);
       coveredUntil = page;
-      if (listedCount(html) < 100) {
+      const listed = listedCount(html);
+      if (listed === 0 && /incapsula|access denied|request unsuccessful|captcha/i.test(html)) {
+        blocked = true;
+        complete = false;
+        log(`IAAI ${query.label}: страница ${page} закрыта защитой сайта. Старый каталог не удаляю`);
+        break;
+      }
+      if (listed < 100) {
         finished = true;
         break;
       }
       await sleep(refresh ? 700 : 350);
     }
-    if (probe && headDigest) {
+    if (!blocked && probe && headDigest) {
       await probe.write(key, {
         head: headDigest,
         ...(probe.mode === "full" && finished ? { lastPage: Math.max(coveredUntil, 1) } : {}),
@@ -237,7 +245,7 @@ export async function pullIaai(
         }
       }
     }
-    if (!finished) {
+    if (!finished && !blocked) {
       complete = false;
       log(`IAAI ${query.label}: достигнут предел страниц, выборка неполная`);
     }

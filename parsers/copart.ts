@@ -355,6 +355,7 @@ export async function pullCopart(
       const key = `copart:${query.label}`;
       const stored = (await probe?.read(key)) ?? null;
       let finished = false;
+      let truncated = false;
       let coveredUntil = -1;
       let headDigest = "";
       let total = 0;
@@ -379,11 +380,36 @@ export async function pullCopart(
         saved += await onPage(lots);
         log(`Copart ${query.label}: страница ${page + 1}, лотов с датой ${lots.length} из ${result.total}`);
         coveredUntil = page;
-        if (result.lots.length < 100 || (page + 1) * 100 >= result.total) {
+        const pageSize = 100;
+        let pageLots = result.lots.length;
+        let pageTotal = result.total;
+        if (pageLots < pageSize && pageTotal > (page + 1) * pageSize) {
+          await sleep(1500);
+          const retry = await loadPage(query.filters, page, query.label);
+          if (retry && retry.lots.length >= pageSize) {
+            const retryLots = retry.lots.map((lot) => mapLot(lot, query.category)).filter((lot): lot is Lot => Boolean(lot));
+            saved += await onPage(retryLots);
+            pageLots = retry.lots.length;
+            pageTotal = retry.total || pageTotal;
+            total = pageTotal;
+            log(`Copart ${query.label}: повтор страницы ${page + 1}, лотов с датой ${retryLots.length} из ${pageTotal}`);
+          } else {
+            truncated = true;
+            complete = false;
+            log(`Copart ${query.label}: страница ${page + 1} оборвалась на ${pageLots} лотах, в выдаче их ${pageTotal}. Старый каталог не удаляю`);
+            break;
+          }
+        }
+        if (pageLots < pageSize || pageTotal <= (page + 1) * pageSize) {
           finished = true;
           break;
         }
         await sleep(refresh ? 700 : 120);
+      }
+      const reportedTotal = stored && stored.total >= 1000 && total < stored.total * 0.5;
+      if (!refresh && reportedTotal) {
+        complete = false;
+        log(`Copart ${query.label}: аукцион сообщил ${total} лотов вместо ${stored?.total}. Старый каталог не удаляю`);
       }
       const tailIndex = total > 0 ? Math.ceil(total / 100) - 1 : -1;
       let lastPage = probe?.mode === "full" && finished ? Math.max(coveredUntil, 0) : tailIndex;
@@ -405,9 +431,9 @@ export async function pullCopart(
           }
         }
       }
-      if (probe && headDigest && lastPage >= 0) await probe.write(key, { head: headDigest, total, lastPage });
-      else if (probe && headDigest) await probe.write(key, { head: headDigest, total });
-      if (!finished) {
+      if (!reportedTotal && !truncated && probe && headDigest && lastPage >= 0) await probe.write(key, { head: headDigest, total, lastPage });
+      else if (!reportedTotal && !truncated && probe && headDigest) await probe.write(key, { head: headDigest, total });
+      if (!finished && !truncated) {
         complete = false;
         log(`Copart ${query.label}: достигнут предел страниц, выборка неполная`);
       }

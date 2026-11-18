@@ -503,6 +503,16 @@ export async function replaceSource(source: Source, lots: Lot[]): Promise<number
 
 const freshAuction = "auction_at >= to_char((now() AT TIME ZONE 'utc') - interval '36 hours', 'YYYY-MM-DD HH24:MI:SS')";
 
+export async function countFreshLots(source: Source): Promise<number> {
+  const row = await dbGet<{ count: number }>(`SELECT COUNT(*)::int AS count FROM lots WHERE source = ? AND ${freshAuction}`, [source]);
+  return Number(row?.count) || 0;
+}
+
+export async function countSeenLots(source: Source, seenAt: number): Promise<number> {
+  const row = await dbGet<{ count: number }>("SELECT COUNT(*)::int AS count FROM lots WHERE source = ? AND seen_at = ?", [source, seenAt]);
+  return Number(row?.count) || 0;
+}
+
 const milesExpr = `(CASE WHEN odometer IS NULL THEN NULL WHEN odometer_unit = 'km' THEN odometer * 0.621371 ELSE odometer END)`;
 
 export function buildWhere(filters: Filters): { sql: string; params: Array<string | number> } {
