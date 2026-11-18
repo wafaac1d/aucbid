@@ -56,7 +56,7 @@ export async function getSyncStatus(): Promise<SyncPublicStatus> {
   return toPublicStatus(await readRow());
 }
 
-const MAX_PAGES = 2000;
+export const MAX_PAGES = 2000;
 
 export function clampPages(raw: string | undefined): number {
   if (!raw) return MAX_PAGES;
@@ -187,19 +187,20 @@ async function beginOrBusy(ignoreCooldown: boolean): Promise<{ accepted: boolean
   }
 }
 
-export async function runSync(mode: SyncMode): Promise<boolean> {
-  if (syncing) return false;
+export type SyncRun = "complete" | "partial" | "busy";
+
+export async function runSync(mode: SyncMode, pages = clampPages(process.env.SYNC_PAGES)): Promise<SyncRun> {
+  if (syncing) return "busy";
   const start = await beginOrBusy(mode === "full");
-  if (!start.accepted) return false;
+  if (!start.accepted) return "busy";
   syncing = true;
-  const pages = clampPages(process.env.SYNC_PAGES);
   try {
     const result = await executeSync(pages, (message) => console.log(message), mode);
     await finishSync(start.startedAt, result.ok, result.message, mode);
-    return true;
+    return result.ok ? "complete" : "partial";
   } catch (error) {
     await finishSync(start.startedAt, false, error instanceof Error ? error.message : String(error), mode);
-    return true;
+    return "partial";
   } finally {
     syncing = false;
   }

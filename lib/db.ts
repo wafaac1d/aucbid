@@ -293,6 +293,15 @@ async function rekeyLots(): Promise<void> {
   }
 }
 
+export async function getMeta(key: string): Promise<string | null> {
+  const row = await dbGet<{ value: string }>("SELECT value FROM meta WHERE key = ?", [key]);
+  return row?.value ?? null;
+}
+
+export async function setMeta(key: string, value: string): Promise<void> {
+  await dbRun("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [key, value]);
+}
+
 export async function countLots(): Promise<number> {
   const row = await dbGet<{ count: number }>("SELECT COUNT(*)::int AS count FROM lots");
   return Number(row?.count) || 0;

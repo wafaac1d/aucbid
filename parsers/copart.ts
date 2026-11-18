@@ -435,7 +435,7 @@ export async function pullCopart(
       else if (!reportedTotal && !truncated && probe && headDigest) await probe.write(key, { head: headDigest, total });
       if (!finished && !truncated) {
         complete = false;
-        log(`Copart ${query.label}: достигнут предел страниц, выборка неполная`);
+        if (!refresh) log(`Copart ${query.label}: достигнут предел страниц, выборка неполная`);
       }
       if (!complete && !refresh) break;
     }

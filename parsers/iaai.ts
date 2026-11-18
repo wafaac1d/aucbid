@@ -247,7 +247,7 @@ export async function pullIaai(
     }
     if (!finished && !blocked) {
       complete = false;
-      log(`IAAI ${query.label}: достигнут предел страниц, выборка неполная`);
+      if (!refresh) log(`IAAI ${query.label}: достигнут предел страниц, выборка неполная`);
     }
     if (!complete && !refresh) break;
   }
