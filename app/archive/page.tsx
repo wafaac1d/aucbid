@@ -58,7 +58,7 @@ export default async function ArchivePage({
           makes.length === 0 ? (
             <div className="empty">
               <h2>Продаж ещё нет</h2>
-              <p>Когда лот уходит с торгов и у него была ставка, цена сохраняется здесь. По марке и модели можно посмотреть, за сколько такие машины уходили.</p>
+              <p>Когда лот уходит с торгов, он остаётся здесь: можно открыть фото и данные машины. Итоговую цену аукцион в открытой ленте не публикует, поэтому ставку до торгов мы сюда не записываем.</p>
             </div>
           ) : (
             <div className="make-cloud">
@@ -96,21 +96,26 @@ export default async function ArchivePage({
             <div className="archive-stats">
               <div>
                 <strong>{formatNumber(summary?.count || 0)}</strong>
-                <span>продаж</span>
+                <span>в архиве</span>
               </div>
-              <div>
-                <strong>{formatMoney(summary?.average ?? null)}</strong>
-                <span>средняя цена</span>
-              </div>
-              <div>
-                <strong>{formatMoney(summary?.min ?? null)}</strong>
-                <span>минимум</span>
-              </div>
-              <div>
-                <strong>{formatMoney(summary?.max ?? null)}</strong>
-                <span>максимум</span>
-              </div>
+              {summary?.average != null ? (
+                <>
+                  <div>
+                    <strong>{formatMoney(summary.average)}</strong>
+                    <span>средняя цена</span>
+                  </div>
+                  <div>
+                    <strong>{formatMoney(summary.min)}</strong>
+                    <span>минимум</span>
+                  </div>
+                  <div>
+                    <strong>{formatMoney(summary.max)}</strong>
+                    <span>максимум</span>
+                  </div>
+                </>
+              ) : null}
             </div>
+            <p className="crumbs">Итоговая цена продажи в открытых данных аукциона не публикуется. Ставку до торгов ценой не считаем. Название открывает сохранённую машину.</p>
             {result && result.items.length > 0 ? (
               <div className="sales-wrap">
                 <table className="sales">
@@ -129,10 +134,12 @@ export default async function ArchivePage({
                       return (
                         <tr key={sale.id}>
                           <td>{saleDate(sale.auctionAt)}</td>
-                          <td>{sale.url ? <a href={sale.url} target="_blank" rel="noreferrer">{title}</a> : title}</td>
+                          <td>
+                            <Link href={`/lot/${sale.id}`}>{title}</Link>
+                          </td>
                           <td>{formatOdometer(sale.odometer, sale.odometerUnit)}</td>
                           <td>{sourceLabel(sale.source)}</td>
-                          <td className="price">{formatMoney(sale.price)}</td>
+                          <td className="price">{sale.price != null ? formatMoney(sale.price) : "Не объявлена"}</td>
                         </tr>
                       );
                     })}
@@ -142,7 +149,7 @@ export default async function ArchivePage({
             ) : (
               <div className="empty">
                 <h2>Таких продаж нет</h2>
-                <p>Для этой модели ещё не сохранена ни одна ставка с завершённых торгов.</p>
+                <p>Для этой модели ещё нет машин, которые ушли с торгов.</p>
               </div>
             )}
             <Pagination page={Math.min(page, pages)} pages={pages} query={query.toString()} path="/archive" />

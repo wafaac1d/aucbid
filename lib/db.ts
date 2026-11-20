@@ -215,6 +215,7 @@ async function ensureSchema(): Promise<void> {
       archived_at BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_sales_model ON sales(make_key, model_key, auction_at DESC);
+    ALTER TABLE sales ALTER COLUMN price DROP NOT NULL;
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sync_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -232,6 +233,11 @@ async function ensureSchema(): Promise<void> {
       last_page INTEGER NOT NULL DEFAULT 0
     );
   `);
+  const cleared = await txFrom(pool).get<{ value: string }>("SELECT value FROM meta WHERE key = 'sales_bid_cleared'");
+  if (cleared?.value !== "1") {
+    await pool.query("UPDATE sales SET price = NULL");
+    await pool.query("INSERT INTO meta (key, value) VALUES ('sales_bid_cleared', '1') ON CONFLICT (key) DO UPDATE SET value = '1'");
+  }
   await rekeyLots();
 }
 
@@ -481,11 +487,11 @@ export async function pruneSource(source: Source, seenAt: number): Promise<numbe
         price, odometer, odometer_unit, auction_at, city, state, location, image, url, title_doc, archived_at
       )
       SELECT id, source, category, lot_number, vin, year, make, make_key, model, model_key, name,
-        current_bid, odometer, odometer_unit, auction_at, city, state, location, image, url, title_doc, ?
+        NULL, odometer, odometer_unit, auction_at, city, state, location, image, url, title_doc, ?
       FROM lots
       WHERE source = ? AND COALESCE(seen_at, 0) <> ? AND current_bid > 0
       ON CONFLICT (id) DO UPDATE SET
-        price = EXCLUDED.price,
+        price = COALESCE(EXCLUDED.price, sales.price),
         name = EXCLUDED.name,
         odometer = EXCLUDED.odometer,
         auction_at = EXCLUDED.auction_at,
@@ -702,12 +708,15 @@ export async function categoryCounts(): Promise<Record<Category, number>> {
 }
 
 export async function relatedLots(lot: Lot, limit = 4): Promise<Lot[]> {
+  const sameYear = lot.year >= 1900;
   const rows = await dbAll<LotRow>(
     `SELECT * FROM lots
-     WHERE id <> ? AND make_key = ? AND ${freshAuction}
+     WHERE id <> ? AND make_key = ? AND ${freshAuction}${sameYear ? " AND year = ?" : ""}
      ORDER BY CASE WHEN model_key = ? THEN 0 ELSE 1 END, auction_at ASC
      LIMIT ?`,
-    [lot.id, nameKey(lot.make), modelKey(lot.model), limit],
+    sameYear
+      ? [lot.id, nameKey(lot.make), lot.year, modelKey(lot.model), limit]
+      : [lot.id, nameKey(lot.make), modelKey(lot.model), limit],
   );
   return rows.map(rowToLot);
 }
@@ -722,7 +731,7 @@ type SaleRow = {
   make: string;
   model: string;
   name: string;
-  price: number;
+  price: number | null;
   odometer: number | null;
   odometer_unit: string;
   auction_at: string;
@@ -731,6 +740,7 @@ type SaleRow = {
   location: string;
   image: string;
   url: string;
+  title_doc: string;
 };
 
 function rowToSale(row: SaleRow): Sale {
@@ -744,7 +754,7 @@ function rowToSale(row: SaleRow): Sale {
     make: row.make,
     model: row.model,
     name: row.name,
-    price: Number(row.price) || 0,
+    price: row.price == null ? null : Number(row.price),
     odometer: row.odometer == null ? null : Number(row.odometer),
     odometerUnit: row.odometer_unit === "km" ? "km" : "mi",
     auctionAt: row.auction_at,
@@ -753,6 +763,7 @@ function rowToSale(row: SaleRow): Sale {
     location: row.location,
     image: row.image,
     url: row.url,
+    titleDoc: row.title_doc || "",
   };
 }
 
@@ -796,6 +807,11 @@ export async function saleSummary(make: string, model: string): Promise<SaleSumm
     min: row?.min == null ? null : Number(row.min),
     max: row?.max == null ? null : Number(row.max),
   };
+}
+
+export async function getSale(id: string): Promise<Sale | null> {
+  const row = await dbGet<SaleRow>("SELECT * FROM sales WHERE id = ?", [id]);
+  return row ? rowToSale(row) : null;
 }
 
 export async function searchSales(make: string, model: string, page: number, pageSize = 40): Promise<{ items: Sale[]; total: number }> {

@@ -316,7 +316,7 @@ img { max-width: 100%; display: block; }
 .sales th { text-align: left; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); padding: 12px 14px; }
 .sales td { padding: 12px 14px; border-top: 1px solid var(--line); vertical-align: top; }
 .sales .price { text-align: right; font-weight: 800; white-space: nowrap; }
-.sales a { font-weight: 700; }
+.sales a { color: var(--blue); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
 
 .footer {
   display: flex; justify-content: space-between; gap: 24px;

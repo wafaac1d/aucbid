@@ -79,21 +79,6 @@ export default async function HomePage() {
                 <LotCard key={lot.id} lot={lot} />
               ))}
             </div>
-            {makes.length > 0 ? (
-              <>
-                <div className="section-head">
-                  <h2>Марки автомобилей</h2>
-                </div>
-                <div className="make-cloud">
-                  {makes.slice(0, 24).map((make) => (
-                    <Link key={make.key} href={`/search?category=car&make=${make.key}`}>
-                      {make.name}
-                      <span>{make.count}</span>
-                    </Link>
-                  ))}
-                </div>
-              </>
-            ) : null}
           </>
         )}
       </section>

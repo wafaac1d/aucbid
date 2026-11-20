@@ -69,7 +69,7 @@ export type Sale = {
   make: string;
   model: string;
   name: string;
-  price: number;
+  price: number | null;
   odometer: number | null;
   odometerUnit: "mi" | "km";
   auctionAt: string;
@@ -78,6 +78,7 @@ export type Sale = {
   location: string;
   image: string;
   url: string;
+  titleDoc: string;
 };
 
 export type SaleSummary = {

@@ -4,17 +4,24 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LotCard } from "@/components/LotCard";
 import { LotGallery } from "@/components/LotGallery";
-import { getLot, relatedLots, searchSales } from "@/lib/db";
+import { getLot, getSale, relatedLots, searchSales } from "@/lib/db";
+import type { Sale } from "@/lib/types";
 import { auctionPlace, categoryLabel, displayName, formatMoney, formatOdometer, formatOdometerDetail, modelKey, nameKey, sourceLabel, translate, vehicleTitle } from "@/lib/format";
 import { AuctionTime } from "@/components/AuctionTime";
 
 export const dynamic = "force-dynamic";
 
+function saleTitle(sale: Sale): string {
+  return sale.name.trim() || [sale.year || null, sale.make, sale.model].filter(Boolean).join(" ");
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
-  const lot = await getLot((await params).id);
-  if (!lot) return { title: "Лот не найден" };
-  const title = vehicleTitle(lot);
-  return { title: `${title}, лот ${lot.lotNumber}` };
+  const id = (await params).id;
+  const lot = await getLot(id);
+  if (lot) return { title: `${vehicleTitle(lot)}, лот ${lot.lotNumber}` };
+  const sale = await getSale(id);
+  if (!sale) return { title: "Лот не найден" };
+  return { title: `${saleTitle(sale)}, лот ${sale.lotNumber}` };
 }
 
 function textValue(value: string): string {
@@ -38,9 +45,62 @@ function SpecPanel({ rows }: { rows: { label: string; value: ReactNode; price?: 
   );
 }
 
+function ArchivedSale({ sale }: { sale: Sale }) {
+  const title = saleTitle(sale);
+  const place = auctionPlace(sale);
+  const when = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Minsk" }).format(new Date(sale.auctionAt));
+  return (
+    <main className="page lot-page">
+      <header className="lot-head">
+        <p className="back">
+          <Link href={`/archive?make=${nameKey(sale.make)}&model=${modelKey(sale.model)}`}>← Архив {sale.make}</Link>
+        </p>
+        <div className="lot-badges">
+          <span className={`badge badge--${sale.source}`}>{sourceLabel(sale.source)}</span>
+          <span className="badge badge--plain">Архив</span>
+        </div>
+        <h1>{title}</h1>
+      </header>
+      <div className="lot-layout">
+        <LotGallery lotId={sale.id} source={sale.source} image={sale.image} alt={title} badges={null} />
+        <aside className="lot-aside">
+          <SpecPanel
+            rows={[
+              { label: "VIN", value: sale.vin || "Скрыт аукционом" },
+              { label: "Год", value: sale.year ? String(sale.year) : "" },
+              { label: "Пробег", value: formatOdometerDetail(sale.odometer, sale.odometerUnit) },
+              { label: "Документ", value: textValue(displayName(sale.titleDoc)) },
+            ]}
+          />
+          <SpecPanel
+            rows={[
+              { label: "Аукцион", value: sourceLabel(sale.source) },
+              { label: "Номер лота", value: sale.lotNumber },
+              { label: "Дата торгов", value: Number.isNaN(new Date(sale.auctionAt).getTime()) ? "" : when },
+              { label: "Локация", value: place },
+              { label: "Цена продажи", value: sale.price != null ? formatMoney(sale.price) : "Не объявлена", price: true },
+            ]}
+          />
+          <p className="crumbs">Открытая лента аукциона не публикует итоговую цену. Ставку, которая была до торгов, мы ценой продажи не записываем.</p>
+          {sale.url ? (
+            <a className="external" href={sale.url} target="_blank" rel="noreferrer">
+              Открыть лот на {sourceLabel(sale.source)}
+            </a>
+          ) : null}
+        </aside>
+      </div>
+    </main>
+  );
+}
+
 export default async function LotPage({ params }: { params: Promise<{ id: string }> }) {
-  const lot = await getLot((await params).id);
-  if (!lot) notFound();
+  const id = (await params).id;
+  const lot = await getLot(id);
+  if (!lot) {
+    const sale = await getSale(id);
+    if (!sale) notFound();
+    return <ArchivedSale sale={sale} />;
+  }
   const title = vehicleTitle(lot);
   const related = await relatedLots(lot);
   const historyMake = nameKey(lot.make);
@@ -122,7 +182,7 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
       {history.items.length > 0 ? (
         <section className="section section--tight">
           <div className="section-head">
-            <h2>За сколько уходили</h2>
+            <h2>Уже уходили с торгов</h2>
             <Link href={`/archive?make=${historyMake}&model=${historyModel}`}>Весь архив</Link>
           </div>
           <div className="sales-wrap">
@@ -139,9 +199,11 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
                 {history.items.map((sale) => (
                   <tr key={sale.id}>
                     <td>{new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", year: "numeric", timeZone: "Europe/Minsk" }).format(new Date(sale.auctionAt))}</td>
-                    <td>{sale.name || [sale.year || null, sale.make, sale.model].filter(Boolean).join(" ")}</td>
+                    <td>
+                      <Link href={`/lot/${sale.id}`}>{sale.name || [sale.year || null, sale.make, sale.model].filter(Boolean).join(" ")}</Link>
+                    </td>
                     <td>{formatOdometer(sale.odometer, sale.odometerUnit)}</td>
-                    <td className="price">{formatMoney(sale.price)}</td>
+                    <td className="price">{sale.price != null ? formatMoney(sale.price) : "Не объявлена"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -152,8 +214,8 @@ export default async function LotPage({ params }: { params: Promise<{ id: string
       {related.length > 0 ? (
         <section className="section section--tight">
           <div className="section-head">
-            <h2>Ещё {lot.make}</h2>
-            <Link href={`/search?category=${lot.category}&make=${nameKey(lot.make)}`}>Все модели</Link>
+            <h2>Ещё {lot.make}{lot.year ? ` ${lot.year}` : ""}</h2>
+            <Link href={`/search?category=${lot.category}&make=${nameKey(lot.make)}${lot.year ? `&yearFrom=${lot.year}&yearTo=${lot.year}` : ""}`}>Все модели</Link>
           </div>
           <div className="cards">
             {related.map((item) => (
