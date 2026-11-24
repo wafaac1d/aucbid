@@ -208,6 +208,29 @@ img { max-width: 100%; display: block; }
   position: relative; width: 100%; aspect-ratio: 16/10; overflow: hidden; min-width: 0;
   border-radius: 18px; background: #e8edf4;
 }
+.photo-slider { position: absolute; inset: 0; display: block; overflow: hidden; }
+.photo-slider .slide {
+  position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: cover;
+}
+.photo-slider--contain .slide { object-fit: contain; }
+.photo-slider .slide.is-enter-next { z-index: 1; animation: photo-enter-next 0.32s ease; }
+.photo-slider .slide.is-leave-next { animation: photo-leave-next 0.32s ease; }
+.photo-slider .slide.is-enter-prev { z-index: 1; animation: photo-enter-prev 0.32s ease; }
+.photo-slider .slide.is-leave-prev { animation: photo-leave-prev 0.32s ease; }
+@keyframes photo-enter-next { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes photo-leave-next { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@keyframes photo-enter-prev { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+@keyframes photo-leave-prev { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) {
+  .photo-slider .slide.is-enter-next,
+  .photo-slider .slide.is-leave-next,
+  .photo-slider .slide.is-enter-prev,
+  .photo-slider .slide.is-leave-prev { animation: none; }
+}
+.lightbox .photo-slider {
+  position: relative; z-index: 1; inset: auto;
+  width: min(100vw - 112px, 1400px); height: min(100vh - 80px, 900px);
+}
 .photo-frame .lot-photo, .photo-frame .photo--empty {
   position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; aspect-ratio: auto;
   object-fit: cover; border-radius: 0;

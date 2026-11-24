@@ -3,7 +3,7 @@
 import { type MouseEvent, type ReactNode, useRef, useState } from "react";
 import Link from "next/link";
 import { auctionImageUrl } from "@/lib/images";
-import { LotImage } from "./LotImage";
+import { PhotoSlider } from "./PhotoSlider";
 
 function iaaiCandidates(image: string): string[] {
   if (!/~I\d+/.test(image)) return image ? [image] : [];
@@ -92,7 +92,7 @@ export function CardPhotos({
   return (
     <>
       <Link href={href} className="card-photo-link">
-        <LotImage src={current} alt={alt} />
+        <PhotoSlider index={index} count={images.length} src={current} alt={alt} />
       </Link>
       {badges}
       {canFlip ? (

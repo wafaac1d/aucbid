@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { auctionImageUrl } from "@/lib/images";
 import { LotImage } from "./LotImage";
+import { PhotoSlider } from "./PhotoSlider";
 
 function iaaiCandidates(image: string): string[] {
   if (!/~I\d+/.test(image)) return image ? [image] : [];
@@ -122,7 +123,7 @@ export function LotGallery({
     <div className="gallery">
       <div className="photo-frame">
         <button type="button" className="photo-open" aria-label="Увеличить фото" disabled={!current} onClick={() => setZoom(true)}>
-          <LotImage src={current} alt={alt} className="lot-photo" />
+          <PhotoSlider index={active} count={images.length} src={current} alt={alt} className="lot-photo" />
           {current ? <span className="photo-zoom">Увеличить</span> : null}
         </button>
         {badges}
@@ -144,7 +145,7 @@ export function LotGallery({
               <button type="button" className="lightbox-close" onClick={() => setZoom(false)}>
                 Закрыть
               </button>
-              <LotImage src={current} alt={alt} className="lightbox-photo" />
+              <PhotoSlider index={active} count={images.length} src={current} alt={alt} className="lightbox-photo" fit="contain" />
               {canStep ? (
                 <>
                   <button type="button" className="photo-nav photo-nav--prev" aria-label="Предыдущее фото" onClick={() => step(-1)}>
